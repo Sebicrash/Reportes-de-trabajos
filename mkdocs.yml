@@ -1,4 +1,4 @@
-site_name: Plantilla para Documentación
+site_name: REPORTES DE TRABAJOS SRA
 markdown_extensions:
   - pymdownx.highlight:
       anchor_linenums: true
@@ -29,7 +29,7 @@ theme:
   highlightjs: true 
   palette:
       - scheme: default
-        primary: red
+        primary: purple
 
   features:
     - content.code.copy
