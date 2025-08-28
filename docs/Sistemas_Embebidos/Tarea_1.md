@@ -115,7 +115,6 @@ int main() {
 
 #### Diagrama del sistema
 
-
 #### Video
 
 <iframe width="560" height="315"
