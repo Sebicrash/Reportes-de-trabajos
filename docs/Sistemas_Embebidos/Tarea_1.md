@@ -59,6 +59,12 @@ int main() {
 }
 
 ```
+#### Diagrama del circuito
+
+![Esquemático 3D](REC/IMG/16.jpg){ width="600" align=center}
+
+![Esquemático 2D](REC/IMG/o.jpg){ width="600" align=center}
+
 #### Video
 
 <iframe width="560" height="315"
@@ -115,6 +121,10 @@ int main() {
 
 #### Diagrama del sistema
 
+![Esquemático 3D](REC/IMG/16.jpg){ width="600" align=center}
+
+![Esquemático 2D](REC/IMG/o.jpg){ width="600" align=center}
+
 #### Video
 
 <iframe width="560" height="315"
@@ -161,7 +171,11 @@ int main() {
     }
 }
 ```
+#### Diagrama del circuito
 
+![Esquemático 3D](REC/IMG/16.jpg){ width="600" align=center}
+
+![Esquemático 2D](REC/IMG/o.jpg){ width="600" align=center}
 
 #### Video
 
