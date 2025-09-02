@@ -250,7 +250,7 @@ int main() {
 #### Video
 
 <iframe width="560" height="315"
-src="https://www.youtube.com/watch?v=bSNO7ncCw5g"
+src="https://www.youtube.com/embed/bSNO7ncCw5g"
 title="YouTube video player"
 frameborder="0"
 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
@@ -334,7 +334,7 @@ int main() {
 #### Video
 
 <iframe width="560" height="315"
-src="https://youtu.be/tf33W2s8G6I?si=I9aajVK2bN4PJJhe"
+src="https://www.youtube.com/embed/tf33W2s8G6I"
 title="YouTube video player"
 frameborder="0"
 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
