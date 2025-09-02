@@ -186,3 +186,157 @@ frameborder="0"
 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
 allowfullscreen>
 </iframe>
+
+## Tarea 3: Inputs
+
+### Compuertas básicas AND / OR / XOR con 2 botones
+**Qué debe hacer:** Con dos botones A y B enciende tres LEDs que muestren en paralelo los resultados de AND, OR y XOR. 
+
+#### Código
+
+```bash
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+ 
+#define LED   0
+#define LED2    1
+#define LED3   3
+ 
+#define Boton1   5
+#define Boton2   6
+ 
+int main() {
+ 
+    gpio_init(LED);
+    gpio_set_dir(LED, true);
+ 
+    gpio_init(LED2);
+    gpio_set_dir(LED2, true);
+ 
+    gpio_init(LED3);
+    gpio_set_dir(LED3, true);
+ 
+    gpio_init(Boton1);
+    gpio_set_dir(Boton1, false);
+    gpio_pull_up(Boton1);
+ 
+    gpio_init(Boton2);
+    gpio_set_dir(Boton2, false);
+    gpio_pull_up(Boton2);
+ 
+    while (true) {
+        // Se invierte para que sea Pull-up
+        uint32_t b1 = !gpio_get(Boton1);
+        uint32_t b2 = !gpio_get(Boton2);
+ 
+        uint32_t AND = b1 & b2;   
+        uint32_t OR  = b1 | b2; 
+        uint32_t XOR = b1 ^ b2;
+ 
+        gpio_clr_mask((1u << LED) | (1u << LED2) | (1u << LED3));
+        gpio_set_mask((AND << LED) |
+                      (OR  << LED2)  |
+                      (XOR << LED3));
+    }
+}
+
+```
+#### Diagrama del circuito
+
+![Esquemático 3D](REC/IMG/a.jpg){ width="600" align=center}
+
+![Esquemático 2D](REC/IMG/ab.jpg){ width="600" align=center}
+
+#### Video
+
+<iframe width="560" height="315"
+src="https://www.youtube.com/watch?v=bSNO7ncCw5g"
+title="YouTube video player"
+frameborder="0"
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+allowfullscreen>
+</iframe>
+
+### Selector cíclico de 4 LEDs con avance/retroceso
+
+**Qué debe hacer:** Mantén un único LED encendido entre LED0..LED3. Un botón AVANZA (0→1→2→3→0) y otro RETROCEDE (0→3→2→1→0). Un push = un paso y si dejas presionado no repite. 
+
+#### Código
+
+```bash
+#include "pico/stdlib.h"
+ 
+#define LED0 0  
+#define LED1 1  
+#define LED2 3  
+#define LED3 4  
+ 
+#define Boton1 5
+#define Boton2 6
+ 
+#define LED_MASK ((1u << LED0) | (1u << LED1) | (1u << LED2) | (1u << LED3))
+ 
+const uint LEDS[4] = {LED0, LED1, LED2, LED3};
+ 
+int main() {
+    stdio_init_all();
+ 
+    for (int i = 0; i < 4; i++) {
+        gpio_init(LEDS[i]);
+        gpio_set_dir(LEDS[i], true);
+    }
+ 
+    gpio_init(Boton1);
+    gpio_set_dir(Boton1, false);  
+    gpio_pull_up(Boton1);
+ 
+    gpio_init(Boton2);
+    gpio_set_dir(Boton2, false);  
+    gpio_pull_up(Boton2);
+ 
+    int posicion = 0;
+    uint32_t Estadob1 = true;
+    uint32_t Estadob2 = true;
+ 
+    while (true) {
+        // Poner posición actual
+        gpio_clr_mask(LED_MASK);
+        gpio_set_mask(1u << LEDS[posicion]);
+ 
+       
+        uint32_t Avance = gpio_get(Boton1);
+        uint32_t Retroceso = gpio_get(Boton2);
+ 
+        if (!Avance && Estadob1) {
+            posicion++;
+            if (posicion > 3) posicion = 0;
+        }
+ 
+        if (!Retroceso && Estadob2) {
+            posicion--;
+            if (posicion < 0) posicion = 3;
+        }
+ 
+        Estadob1 = Avance;
+        Estadob2 = Retroceso;
+ 
+        sleep_ms(20);
+    }
+}
+```
+
+#### Diagrama del circuito
+
+![Esquemático 3D](REC/IMG/a.jpg){ width="600" align=center}
+
+![Esquemático 2D](REC/IMG/ab.jpg){ width="600" align=center}
+
+#### Video
+
+<iframe width="560" height="315"
+src="https://youtu.be/tf33W2s8G6I?si=I9aajVK2bN4PJJhe"
+title="YouTube video player"
+frameborder="0"
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+allowfullscreen>
+</iframe>
