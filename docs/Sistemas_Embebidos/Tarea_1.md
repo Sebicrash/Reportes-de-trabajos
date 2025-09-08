@@ -340,3 +340,151 @@ frameborder="0"
 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
 allowfullscreen>
 </iframe>
+
+## Tarea 4: Ping-Pong
+
+Programar un mini-Pong con 5 LEDs en línea y 2 botones usando interrupciones (ISR) para registrar el “golpe” del jugador exactamente cuando la “pelota” (un LED encendido) llega al extremo de su lado.
+
+### Reglas del juego
+
+1. Pelota: es un único LED encendido que se mueve automáticamente de un extremo al otro (L1→L5→L1…) a un ritmo fijo.
+
+2. Golpe con ISR: cada botón genera una interrupción.
+
+    * El BTN_L solo cuenta si, en el instante de la ISR, la pelota está en L1.
+
+    * El BTN_R solo cuenta si, en el instante de la ISR, la pelota está en L5.
+
+    * Si coincide, la pelota rebota: invierte su dirección.
+
+    * Si no coincide (la pelota no está en el último LED de ese lado), el botón se ignora.
+
+3. Fallo y punto: si la pelota alcanza L1 y no hubo golpe válido del lado izquierdo en ese momento, anota el jugador derecho. Análogamente, si alcanza L5 sin golpe válido, anota el jugador izquierdo.
+
+4. Indicador de punto: al anotar, se parpadea el LED de punto 3 veces del jugador que metió el punto .
+
+5. Reinicio tras punto: después del parpadeo, la pelota se reinicia en el centro (L3) y comienza a moverse hacia el jugador que metió el punto.
+
+6. Inicio del juego: al encender, la pelota inicia en L3 y no se mueve hasta que se presione un boton y debera moverse a la direccion opuesta del boton presionado.
+
+
+### Código
+```
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+
+#define Led 0
+#define Led2 1
+#define Led3 2
+#define Led4 3
+#define Led5 4
+#define Led6p 6   
+#define Led7p 8  
+
+#define BotonIzq 14     
+#define BotonDer 15     
+
+#define LED_MASK ((1u << Led) | (1u << Led2) | (1u << Led3) | (1u << Led4) | (1u << Led5))
+
+const uint LEDS[5] = {Led, Led2, Led3, Led4, Led5};
+
+volatile int posicion = 2;   // pelota empieza en el centro
+volatile int dir = 1;        
+volatile bool fallo = false;
+volatile int fallo_jugador = -1; 
+
+// ISR para botones
+void boton_isr(uint gpio, uint32_t events) {
+    if (posicion == 0 && gpio == BotonIzq) {
+        dir = 1;
+    } else if (posicion == 4 && gpio == BotonDer) {
+        dir = -1;
+    } else {
+        fallo = true;
+        if (gpio == BotonIzq) {
+            fallo_jugador = 0; 
+        } else if (gpio == BotonDer) {
+            fallo_jugador = 1; 
+        }
+    }
+}
+
+int main() {
+    stdio_init_all();
+
+    for (int i = 0; i < 5; i++) {
+        gpio_init(LEDS[i]);
+        gpio_set_dir(LEDS[i], true);
+    }
+
+    gpio_init(Led6p);
+    gpio_set_dir(Led6p, true);
+    gpio_init(Led7p);
+    gpio_set_dir(Led7p, true);
+
+    gpio_init(BotonIzq);
+    gpio_set_dir(BotonIzq, false);
+    gpio_pull_up(BotonIzq);
+    gpio_set_irq_enabled_with_callback(BotonIzq, GPIO_IRQ_EDGE_FALL, true, &boton_isr);
+
+    gpio_init(BotonDer);
+    gpio_set_dir(BotonDer, false);
+    gpio_pull_up(BotonDer);
+    gpio_set_irq_enabled_with_callback(BotonDer, GPIO_IRQ_EDGE_FALL, true, &boton_isr);
+
+    while (true) {
+        gpio_clr_mask(LED_MASK); 
+        gpio_set_mask(1u << LEDS[posicion]); 
+
+        sleep_ms(300);
+
+        if (fallo) {
+            gpio_clr_mask(LED_MASK);
+
+            if (fallo_jugador == 0) {
+                gpio_put(Led6p, 1);
+                sleep_ms(5000);
+                gpio_put(Led6p, 0);
+            } else if (fallo_jugador == 1) {
+                gpio_put(Led7p, 1);
+                sleep_ms(5000);
+                gpio_put(Led7p, 0);
+            }
+
+            // reiniciar juego
+            fallo = false;
+            fallo_jugador = -1;
+            posicion = 2;
+            dir = 1;
+            continue;
+        }
+
+        posicion += dir;
+
+        // Rebote 
+        if (posicion < 0) {
+            fallo = true;
+            fallo_jugador = 0;
+        } else if (posicion > 4) {
+            fallo = true;
+            fallo_jugador = 1;
+        }
+    }
+}
+```
+
+### Esquema
+
+![Esquemático 3D](REC/IMG/diagrama_pong.jpg){ width="600" align=center}
+
+![Esquemático 2D](REC/IMG/diagrama_pong2.jpg){ width="600" align=center}
+
+### Video
+
+<iframe width="560" height="315"
+src="https://www.youtube.com/embed/cZ1QBH4Tw2o"
+title="YouTube video player"
+frameborder="0"
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+allowfullscreen>
+</iframe>
