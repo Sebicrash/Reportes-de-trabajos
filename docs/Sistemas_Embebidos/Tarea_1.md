@@ -375,11 +375,11 @@ Programar un mini-Pong con 5 LEDs en línea y 2 botones usando interrupciones (I
 
 #define Led 0
 #define Led2 1
-#define Led3 2
+#define Led3 2   // LED central
 #define Led4 3
 #define Led5 4
-#define Led6p 6   
-#define Led7p 8  
+#define Led6p 6  
+#define Led7p 8   
 
 #define BotonIzq 14     
 #define BotonDer 15     
@@ -387,11 +387,10 @@ Programar un mini-Pong con 5 LEDs en línea y 2 botones usando interrupciones (I
 #define LED_MASK ((1u << Led) | (1u << Led2) | (1u << Led3) | (1u << Led4) | (1u << Led5))
 
 const uint LEDS[5] = {Led, Led2, Led3, Led4, Led5};
-
-volatile int posicion = 2;   // pelota empieza en el centro
-volatile int dir = 1;        
-volatile bool fallo = false;
-volatile int fallo_jugador = -1; 
+int posicion = 2;  
+int dir = 1;        
+bool fallo = false;
+int fallo_jugador = -1; 
 
 // ISR para botones
 void boton_isr(uint gpio, uint32_t events) {
@@ -406,6 +405,16 @@ void boton_isr(uint gpio, uint32_t events) {
         } else if (gpio == BotonDer) {
             fallo_jugador = 1; 
         }
+    }
+}
+
+
+void Inicioled() {
+    for (int i = 0; i < 3; i++) {
+        gpio_put(Led3, 1);
+        sleep_ms(500);
+        gpio_put(Led3, 0); 
+        sleep_ms(500);
     }
 }
 
@@ -432,6 +441,9 @@ int main() {
     gpio_pull_up(BotonDer);
     gpio_set_irq_enabled_with_callback(BotonDer, GPIO_IRQ_EDGE_FALL, true, &boton_isr);
 
+  
+    Inicioled();
+
     while (true) {
         gpio_clr_mask(LED_MASK); 
         gpio_set_mask(1u << LEDS[posicion]); 
@@ -456,12 +468,15 @@ int main() {
             fallo_jugador = -1;
             posicion = 2;
             dir = 1;
+
+        
+            Inicioled();
             continue;
         }
 
         posicion += dir;
 
-        // Rebote 
+        // Rebote fallido
         if (posicion < 0) {
             fallo = true;
             fallo_jugador = 0;
@@ -482,7 +497,7 @@ int main() {
 ### Video
 
 <iframe width="560" height="315"
-src="https://www.youtube.com/embed/cZ1QBH4Tw2o"
+src="https://www.youtube.com/embed/WDvfNiqJyws"
 title="YouTube video player"
 frameborder="0"
 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
