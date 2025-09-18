@@ -768,7 +768,120 @@ Modificar su pong, para tener dos botones adicionales, que suban y bajen la velo
 
 #### Código
 ```
+#include "pico/stdlib.h"
+#include "hardware/gpio.h"
+
+#define Leds 5
+#define Delayminimo 100
+#define Delaymaximo 1000
+#define Delay 100
+
+const uint Boton1 = 14;     
+const uint Boton2 = 15;  
+const uint Botonmasvel = 13;  
+const uint Botonmenosvel = 12;
+const uint LEDS[Leds] = {0, 1, 2, 3, 4};
+const uint LedP1 = 6;    // LED indicador derecha
+const uint LedP2 = 8;    // LED indicador izquierda
+
+volatile bool Reb1 = false;
+volatile bool Reb2 = false;
+volatile bool Subiovel = false;
+volatile bool Bajovel = false;
+
+void button_isr(uint gpio, uint32_t events) {
+    if (gpio == Boton1) Reb1 = true;
+    else if (gpio == Boton2) Reb2 = true;
+    else if (gpio == Botonmasvel) Subiovel = true;
+    else if (gpio == Botonmenosvel) Bajovel = true;
+}
+
+void score_point(uint led) {
+    for (int i = 0; i < 3; i++) {
+        gpio_put(led, 1);
+        sleep_ms(150);
+        gpio_put(led, 0);
+        sleep_ms(150);
+    }
+}
+
+int main() {
+    // Anotación de puntos
+    gpio_init(LedP1); gpio_set_dir(LedP1, true);
+    gpio_init(LedP2); gpio_set_dir(LedP2, true);
+
+    
+    gpio_init(Boton1); gpio_set_dir(Boton1, false); gpio_pull_up(Boton1);
+    gpio_set_irq_enabled_with_callback(Boton1, GPIO_IRQ_EDGE_FALL, true, &button_isr);
+
+    gpio_init(Boton2); gpio_set_dir(Boton2, false); gpio_pull_up(Boton2);
+    gpio_set_irq_enabled(Boton2, GPIO_IRQ_EDGE_FALL, true);
+
+    gpio_init(Botonmasvel); gpio_set_dir(Botonmasvel, false); gpio_pull_up(Botonmasvel);
+    gpio_set_irq_enabled(Botonmasvel, GPIO_IRQ_EDGE_FALL, true);
+
+    gpio_init(Botonmenosvel); gpio_set_dir(Botonmenosvel, false); gpio_pull_up(Botonmenosvel);
+    gpio_set_irq_enabled(Botonmenosvel, GPIO_IRQ_EDGE_FALL, true);
+
+    // LEDs del juego
+    for (int i = 0; i < Leds; i++) {
+        gpio_init(LEDS[i]);
+        gpio_set_dir(LEDS[i], true);
+    }
+
+    int current_led = Leds / 2;
+    int direction = 0;
+    bool game_started = false;
+    int delay_ms = 400; // velocidad inicial
+
+    gpio_put(LEDS[current_led], 1);
+
+    while (true) {
+        // Ajustar velocidad
+        if (Subiovel) {
+            if (delay_ms > Delayminimo) delay_ms -= Delay;
+            Subiovel = false;
+        }
+        if (Bajovel) {
+            if (delay_ms < Delaymaximo) delay_ms += Delay;
+            Bajovel = false;
+        }
+
+        
+        if (!game_started) {
+            if (Reb1) { direction = 1; game_started = true; Reb1 = false; gpio_put(LEDS[current_led], 0);}
+            else if (Reb2) { direction = -1; game_started = true; Reb2 = false; gpio_put(LEDS[current_led], 0);}
+            else continue;
+        }
+
+        gpio_put(LEDS[current_led], 1);
+        sleep_ms(delay_ms);  //el delay depende del botón
+        gpio_put(LEDS[current_led], 0);
+
+        current_led += direction;
+
+        if (current_led == -1) {
+            if (Reb1) { direction = 1; current_led = 0; Reb1 = false; }
+            else { score_point(LedP1); current_led = Leds/2; direction = 1; }
+        }
+        if (current_led == Leds) {
+            if (Reb2) { direction = -1; current_led = Leds - 1; Reb2 = false; }
+            else { score_point(LedP2); current_led = Leds/2; direction = -1; }
+        }
+    }
+}
 ```
 #### Esquema
 
+
+![Esquemático 3D](REC/IMG/pong.jpg){ width="600" align=center}
+
 #### Video
+
+<iframe width="560" height="315"
+src="https://www.youtube.com/embed/k_8adMmJoM0"
+title="YouTube video player"
+frameborder="0"
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+allowfullscreen>
+</iframe>
