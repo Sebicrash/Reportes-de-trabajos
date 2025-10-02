@@ -1127,3 +1127,364 @@ frameborder="0"
 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
 allowfullscreen>
 </iframe>
+
+## Tarea 7
+### 7.1: Control de Duty Cycle — Motor DC
+Implementar un circuito con un motor DC controlado mediante PWM variando el duty cycle.
+
+Usar 2 botones para seleccionar entre 3 velocidades predefinidas (baja, media y alta).
+
+#### Código
+```
+#include "pico/stdlib.h"
+#include "hardware/pwm.h"
+
+// Pines puente H TB6612
+#define PWMA   0   
+#define AIN1   1   
+#define AIN2   2   
+#define STBY   3   
+
+#define BTN_LOW   16
+#define BTN_MED   17
+#define BTN_HIGH  18
+
+#define F_PWM_HZ 2000   
+#define TOP 1023       
+
+#define DUTY_LOW   (TOP * 30 / 100)   // 30%
+#define DUTY_MED   (TOP * 60 / 100)   // 60%
+#define DUTY_HIGH  (TOP * 90 / 100)   // 90%
+
+int main() {
+    stdio_init_all();
+
+    gpio_init(AIN1);
+    gpio_set_dir(AIN1, GPIO_OUT);
+    gpio_put(AIN1, 1);
+
+    gpio_init(AIN2);
+    gpio_set_dir(AIN2, GPIO_OUT);
+    gpio_put(AIN2, 0);
+
+    gpio_init(STBY);
+    gpio_set_dir(STBY, GPIO_OUT);
+    gpio_put(STBY, 1);
+
+    gpio_set_function(PWMA, GPIO_FUNC_PWM);
+    uint slice = pwm_gpio_to_slice_num(PWMA);
+    uint chan  = pwm_gpio_to_channel(PWMA);
+
+    float f_clk = 125000000.0f;
+    float div = f_clk / (F_PWM_HZ * (TOP + 1));
+    pwm_set_clkdiv(slice, div);
+    pwm_set_wrap(slice, TOP);
+
+    pwm_set_chan_level(slice, chan, 0);
+    pwm_set_enabled(slice, true);
+
+    gpio_init(BTN_LOW);
+    gpio_set_dir(BTN_LOW, GPIO_IN);
+    gpio_pull_up(BTN_LOW);
+
+    gpio_init(BTN_HIGH);
+    gpio_set_dir(BTN_HIGH, GPIO_IN);
+    gpio_pull_up(BTN_HIGH);
+
+    while (1) {
+        if (!gpio_get(BTN_LOW)) {
+            pwm_set_chan_level(slice, chan, DUTY_LOW);
+        }
+        
+        else if (!gpio_get(BTN_HIGH)) {
+            pwm_set_chan_level(slice, chan, DUTY_HIGH);
+        }
+        sleep_ms(100); 
+    }
+}
+
+```
+### Diagrama
+
+![Esquemático 3D](REC/IMG/motor.jpg){ width="600" align=center}
+
+### Video
+
+<iframe width="560" height="315"
+src="https://www.youtube.com/embed/w2n16bGaz-0"
+title="YouTube video player"
+frameborder="0"
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+allowfullscreen>
+</iframe>
+
+### 7.2: Control de Frecuencia — Canción con Buzzer
+Programar un buzzer piezoeléctrico para reproducir una melodía reconocible.
+
+Variar la frecuencia del PWM para las notas, manteniendo el duty en 50 %.
+
+Cada nota debe incluir su frecuencia y duración en el código.
+#### Código
+```
+#include "pico/stdlib.h"
+#include "hardware/pwm.h"
+#include <stdint.h>
+
+
+#define Buzzer 2
+#define TEMPO 200   // BPM
+ 
+#define DO3   34
+#define RE3   61
+#define MI3   68
+#define FA3   78
+#define SOL3  82
+#define SOLs3 111
+#define LA3   123
+#define SI3   151
+
+#define DO4   220
+#define DOs4  184
+#define RE4   250
+#define REs4  218
+#define MI4   282  
+#define FA4   300
+#define FAs4  277
+#define SOLb4 277
+#define SOL4  330
+#define SOLs4 350
+#define LAb4  350
+#define LA4   370
+#define LAs4  392
+#define SIb4  392
+#define SI4   420
+
+#define DO5   442
+#define DOs5  457
+#define RE5   495
+#define REs5  523
+#define MIb5  523
+#define MI5   560
+#define FA5   603
+#define FAs5  630
+#define SOL5  660
+#define SOLs5 735
+#define LA5   755
+#define LAs5  835
+#define SI5   845
+
+#define DO6   880
+
+#define SILENCIO 0
+
+
+// FIGURAS
+#define REDONDA   4.0f
+#define BLANCAP   3.0f
+#define BLANCA    2.0f
+#define NEGRA     1.0f
+#define CORCHEA   0.5f
+#define DCORCHEA  0.25f
+
+const float reloj = 125000000.0f; // reloj 125 MHz
+uint slice_num;
+uint chan_num;
+
+// ---------- UTIL ----------
+static inline int duracion_ms(float figura) {
+    float negra_ms = 60000.0f / (float)TEMPO;
+    return (int)(figura * negra_ms + 0.5f);
+}
+
+void iniciar_pwm(uint gpio) {
+    gpio_set_function(gpio, GPIO_FUNC_PWM);
+    slice_num = pwm_gpio_to_slice_num(gpio);
+    chan_num  = pwm_gpio_to_channel(gpio);
+    pwm_set_enabled(slice_num, true);
+}
+
+void reproducir_nota(int frecuencia, float figura) {
+    if (frecuencia == SILENCIO) {
+        pwm_set_chan_level(slice_num, chan_num, 0);
+        sleep_ms(duracion_ms(figura));
+        return;
+    }
+
+    uint32_t wrap = 0;
+    float clkdiv = 1.0f;
+    for (int d = 1; d <= 256; d++) {
+        float wrapf = reloj / ((float)d * (float)frecuencia) - 1.0f;
+        if (wrapf >= 1.0f && wrapf <= 65535.0f) {
+            clkdiv = (float)d;
+            wrap = (uint32_t)(wrapf + 0.5f);
+            break;
+        }
+    }
+
+    if (wrap == 0) {
+        wrap = 65535;
+        clkdiv = reloj / ((wrap + 1) * (float)frecuencia);
+        if (clkdiv < 1.0f) clkdiv = 1.0f;
+        if (clkdiv > 256.0f) clkdiv = 256.0f;
+    }
+
+    pwm_set_clkdiv(slice_num, clkdiv);
+    pwm_set_wrap(slice_num, wrap);
+    pwm_set_chan_level(slice_num, chan_num, wrap / 2);
+
+    sleep_ms(duracion_ms(figura));
+
+    pwm_set_chan_level(slice_num, chan_num, 0);
+    sleep_ms(30);
+}
+
+
+typedef struct {
+    int nota;
+    float figura;
+} Nota_t;
+
+
+Nota_t escala[] = {
+    {MIb5, NEGRA},{SILENCIO, BLANCA}, {RE4, NEGRA}, {SILENCIO, BLANCA}, {MI4, NEGRA}, {SILENCIO, BLANCA}, {FA4, NEGRA}, {SILENCIO, BLANCA}, {SOL4, NEGRA}, {SILENCIO, BLANCA}, {LA4, NEGRA}, {SILENCIO, BLANCA}, {SI4, NEGRA}, {SILENCIO,BLANCA},
+ {DO5, NEGRA}, {SILENCIO, BLANCA}, {RE5, NEGRA}, {SILENCIO, BLANCA}, {MI5, NEGRA}, {SILENCIO, BLANCA}, {FA5, NEGRA}, {SILENCIO, BLANCA}, {SOL5, NEGRA}, {SILENCIO, BLANCA}, {LA5, NEGRA}, {SILENCIO, BLANCA}, {SI5, NEGRA}, {SILENCIO,BLANCA}, {DO6,NEGRA}
+};
+
+
+Nota_t cumple[] = {
+    {DO4, NEGRA}, {DO4, CORCHEA}, {RE4, CORCHEA}, {DO4, NEGRA}, {FA4, NEGRA}, {MI4, 2.0f},
+    {DO4, NEGRA}, {DO4, CORCHEA}, {RE4, CORCHEA}, {DO4, NEGRA}, {SOL4, NEGRA}, {FA4, 2.0f},
+    {DO4, NEGRA}, {DO4, CORCHEA}, {DO5, CORCHEA}, {LA4, NEGRA}, {FA4, NEGRA}, {MI4, NEGRA}, {RE4, 2.0f},
+    {SI4, NEGRA}, {SI4, CORCHEA}, {LA4, CORCHEA}, {FA4, NEGRA}, {SOL4, NEGRA}, {FA4, 2.0f}
+};
+
+Nota_t mario[] = { {MI5, CORCHEA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {SOL5, CORCHEA}, {SILENCIO, BLANCA}, {SOL4,CORCHEA}, {SILENCIO, CORCHEA},{SILENCIO, NEGRA},
+{DO5, NEGRA}, {SILENCIO, CORCHEA}, {SOL4, NEGRA}, {SILENCIO, CORCHEA}, {MI4, NEGRA}, {SILENCIO, CORCHEA}, {LA4, NEGRA}, {SI4, NEGRA}, {SIb4, CORCHEA}, {LA4, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, NEGRA}, {FA5, CORCHEA}, {SOL5, CORCHEA}, {SILENCIO, CORCHEA}, {MI5, NEGRA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SI4, NEGRA}, {SILENCIO, CORCHEA},
+{DO5, NEGRA}, {SILENCIO, CORCHEA}, {SOL4, NEGRA}, {SILENCIO, CORCHEA}, {MI4, NEGRA}, {SILENCIO, CORCHEA}, {LA4, NEGRA}, {SI4, NEGRA}, {SIb4, CORCHEA}, {LA4, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, NEGRA}, {FA5, CORCHEA}, {SOL5, CORCHEA}, {SILENCIO, CORCHEA}, {MI5, NEGRA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SI4, NEGRA}, {SILENCIO, NEGRA}, {SILENCIO, CORCHEA},
+{SOL5, CORCHEA}, {FAs5, CORCHEA}, {FA5, CORCHEA}, {REs5, NEGRA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SILENCIO, NEGRA}, {SOL5, CORCHEA}, {FAs5, CORCHEA}, {FA5, CORCHEA}, {REs5, NEGRA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {DO6, NEGRA}, {DO6, CORCHEA}, {DO6, NEGRA}, {SILENCIO, BLANCA}, {SILENCIO, CORCHEA},
+{SOL5, CORCHEA}, {FAs5, CORCHEA}, {FA5, CORCHEA}, {REs5, NEGRA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SILENCIO, NEGRA}, {MIb5, NEGRA}, {SILENCIO, CORCHEA}, {RE5, NEGRA}, {SILENCIO, CORCHEA}, {DO5, NEGRA}, {SILENCIO, BLANCA}, {SILENCIO, NEGRA},
+{SOL5, CORCHEA}, {FAs5, CORCHEA}, {FA5, CORCHEA}, {REs5, NEGRA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SILENCIO, NEGRA}, {SOL5, CORCHEA}, {FAs5, CORCHEA}, {FA5, CORCHEA}, {REs5, NEGRA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {DO6, NEGRA}, {DO6, CORCHEA}, {DO6, NEGRA}, {SILENCIO, BLANCA}, {SILENCIO, CORCHEA},
+{SOL5, CORCHEA}, {FAs5, CORCHEA}, {FA5, CORCHEA}, {REs5, NEGRA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {LA4, CORCHEA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SILENCIO, NEGRA}, {MIb5, NEGRA}, {SILENCIO, CORCHEA}, {RE5, NEGRA}, {SILENCIO, CORCHEA}, {DO5, NEGRA}, {SILENCIO, BLANCA},
+{DO5, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {RE5, NEGRA}, {MI5, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {LA4, CORCHEA}, {SOL4, BLANCA}, {DO5, CORCHEA}, {DO5, CORCHEA},  {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {MI5, NEGRA}, {SILENCIO, REDONDA}, 
+{DO5, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {RE5, NEGRA}, {MI5, CORCHEA}, {DO5, CORCHEA}, {SILENCIO, CORCHEA}, {LA4, CORCHEA}, {SOL4, BLANCA}, {SILENCIO, CORCHEA}, {MI5, CORCHEA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {DO5, CORCHEA}, {MI5, CORCHEA}, {SILENCIO, CORCHEA}, {SOL5, CORCHEA}, {SILENCIO, BLANCA}, {SOL4,CORCHEA}, {SILENCIO, CORCHEA},{SILENCIO, NEGRA},
+{DO5, NEGRA}, {SILENCIO, CORCHEA}, {SOL4, NEGRA}, {SILENCIO, CORCHEA}, {MI4, NEGRA}, {SILENCIO, CORCHEA}, {LA4, NEGRA}, {SI4, NEGRA}, {SIb4, CORCHEA}, {LA4, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, NEGRA}, {FA5, CORCHEA}, {SOL5, CORCHEA}, {SILENCIO, CORCHEA}, {MI5, NEGRA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SI4, NEGRA}, {SILENCIO, CORCHEA},
+{DO5, NEGRA}, {SILENCIO, CORCHEA}, {SOL4, NEGRA}, {SILENCIO, CORCHEA}, {MI4, NEGRA}, {SILENCIO, CORCHEA}, {LA4, NEGRA}, {SI4, NEGRA}, {SIb4, CORCHEA}, {LA4, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, NEGRA}, {FA5, CORCHEA}, {SOL5, CORCHEA}, {SILENCIO, CORCHEA}, {MI5, NEGRA}, {DO5, CORCHEA}, {RE5, CORCHEA}, {SI4, NEGRA}, {SILENCIO, NEGRA}, {SILENCIO, NEGRA},
+{MI5, CORCHEA}, {DO5, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, NEGRA}, {LA4, CORCHEA}, {LA4, CORCHEA}, {FA5, NEGRA}, {FA5, CORCHEA}, {LA4, NEGRA}, {SILENCIO, NEGRA}, {SI4, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL5, CORCHEA}, {SILENCIO, DCORCHEA}, {FA5, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {DO5, NEGRA}, {LA4, CORCHEA}, {SOL4, NEGRA}, {SILENCIO, NEGRA},
+{MI5, CORCHEA}, {DO5, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, NEGRA}, {LA4, CORCHEA}, {LA4, CORCHEA}, {FA5, NEGRA}, {FA5, CORCHEA}, {LA4, NEGRA}, {SILENCIO, NEGRA}, {SI4, CORCHEA}, {FA5, NEGRA}, {FA5, CORCHEA}, {FA5, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {SILENCIO, DCORCHEA}, {RE5, CORCHEA}, {SILENCIO,DCORCHEA}, {DO5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL4, CORCHEA}, {SILENCIO, DCORCHEA}, {MI4, CORCHEA}, {DO4, NEGRA}, {SILENCIO, NEGRA},
+{MI5, CORCHEA}, {DO5, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, NEGRA}, {LA4, CORCHEA}, {LA4, CORCHEA}, {FA5, NEGRA}, {FA5, CORCHEA}, {LA4, NEGRA}, {SILENCIO, NEGRA}, {SI4, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, CORCHEA}, {SILENCIO, DCORCHEA}, {LA5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL5, CORCHEA}, {SILENCIO, DCORCHEA}, {FA5, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {DO5, NEGRA}, {LA4, CORCHEA}, {SOL4, NEGRA}, {SILENCIO, NEGRA},
+{MI5, CORCHEA}, {DO5, NEGRA}, {SOL4, CORCHEA}, {SILENCIO, CORCHEA}, {SOLs4, NEGRA}, {LA4, CORCHEA}, {LA4, CORCHEA}, {FA5, NEGRA}, {FA5, CORCHEA}, {LA4, NEGRA}, {SILENCIO, NEGRA}, {SI4, CORCHEA}, {FA5, NEGRA}, {FA5, CORCHEA}, {FA5, CORCHEA}, {SILENCIO, DCORCHEA}, {MI5, CORCHEA}, {SILENCIO, DCORCHEA}, {RE5, CORCHEA}, {SILENCIO,DCORCHEA}, {DO5, CORCHEA}, {SILENCIO, DCORCHEA}, {SOL4, CORCHEA}, {SILENCIO, DCORCHEA}, {MI4, CORCHEA}, {DO4, NEGRA}, {SILENCIO, BLANCA},
+{DO5, BLANCA}, {SILENCIO, DCORCHEA}, {SOL4, BLANCA}, {SILENCIO, DCORCHEA}, {MI4, NEGRA}, {SILENCIO, CORCHEA}, {LA4, NEGRA}, {SILENCIO, DCORCHEA}, {SI4, NEGRA}, {SILENCIO, DCORCHEA}, {SIb4, NEGRA}, {SILENCIO, DCORCHEA}, {LAb4, NEGRA}, {SILENCIO, DCORCHEA}, {SIb4, NEGRA}, {SILENCIO, DCORCHEA}, {LAb4, NEGRA}, {SILENCIO, DCORCHEA}, {SOL4, CORCHEA}, {FA4, CORCHEA}, {SOL4, BLANCAP}, {SILENCIO, REDONDA}, {SILENCIO, REDONDA}
+};
+
+
+// ---------- Función genérica ----------
+void reproducir_melodia(Nota_t *melodia, int n) {
+    for (int i = 0; i < n; i++) {
+        reproducir_nota(melodia[i].nota, melodia[i].figura);
+    }
+}
+
+int main() {
+    stdio_init_all();
+    iniciar_pwm(Buzzer);
+
+    Nota_t *melodia = mario;  // seleccionar la función de melodía, cambiar mario por la que sea
+    int n = sizeof(mario) / sizeof(mario[0]);
+    
+
+    while (1) {
+        reproducir_melodia(melodia, n);
+        sleep_ms(500); // pausa para el bucle de la melodía
+    }
+
+    return 0;
+}
+```
+#### Diagrama
+
+![Esquemático 3D](REC/IMG/buzzer.jpg){ width="600" align=center}
+
+#### Video
+
+<iframe width="560" height="315"
+src="https://www.youtube.com/embed/0Y3ZReQiVZQ"
+title="YouTube video player"
+frameborder="0"
+allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+allowfullscreen>
+</iframe>
+
+### 7.3: Generación de Señales — Senoidal de 60 Hz con PWM + Filtro RC
+Generar una señal sinusoidal aproximada de 60 Hz variando el duty cycle del PWM según una función seno.
+
+Construir un filtro RC pasabajos básico y verificar la señal en el osciloscopio
+#### Código
+```
+#include "pico/stdlib.h"
+#include "hardware/irq.h"
+#include "hardware/structs/timer.h"
+#include "hardware/pwm.h"
+#include <math.h>
+
+#define PWMA 0       
+#define FS   2000   
+#define F_SENO 60    
+#define TOP   1023   
+
+#define ALARM0_NUM 0
+#define ALARM0_IRQ timer_hardware_alarm_get_irq_num(timer_hw, ALARM0_NUM)
+
+#define TABLA_T (FS / F_SENO)
+
+uint16_t tabla_sen[TABLA_T];
+volatile int x = 0;
+
+void alarm0_isr() {
+    hw_clear_bits(&timer_hw->intr, 1u << ALARM0_NUM);
+    // Actualizar PWM con el siguiente valor del seno
+    pwm_set_gpio_level(PWMA, tabla_sen[x]);
+    x = (x + 1) % TABLA_T;
+    uint64_t now = time_us_64();
+    timer_hw->alarm[ALARM0_NUM] = (uint32_t)(now + 1000000 / FS);
+}
+
+int main() {
+    stdio_init_all();
+
+    // === Generar tabla de seno ===
+    for (int i = 0; i < TABLA_T; i++) {
+        float ang = 2 * M_PI * i / TABLA_T;
+        float s = (sinf(ang) + 1.0f) / 2.0f;  // Normalizado 0–1
+        tabla_sen[i] = (uint16_t)(s * TOP);
+    }
+
+    // === Configurar PWM en PWMA ===
+    gpio_set_function(PWMA, GPIO_FUNC_PWM);
+    uint slice = pwm_gpio_to_slice_num(PWMA);
+    float f_clk = 125000000.0f; // clock base 125 MHz
+    float div = f_clk / (FS * (TOP + 1));
+    pwm_set_clkdiv(slice, div);
+    pwm_set_wrap(slice, TOP);
+    pwm_set_enabled(slice, true);
+
+    irq_set_exclusive_handler(ALARM0_IRQ, alarm0_isr);
+    irq_set_enabled(ALARM0_IRQ, true);
+
+    uint64_t now = time_us_64();
+    timer_hw->alarm[ALARM0_NUM] = (uint32_t)(now + 1000000 / FS);
+
+    while (1) {
+        tight_loop_contents(); 
+    }
+}
+
+```
+#### Diagrama
+
+![Esquemático 3D](REC/IMG/osciloscopio.jpg){ width="600" align=center}
+
+#### Evidencia
+Señal de entrada del PWM a 2kHz
+![Esquemático 3D](REC/IMG/pwm.jpg){ width="600" align=center}
+Señal de salida del filtro a 60Hz
+![Esquemático 3D](REC/IMG/seno.jpg){ width="600" align=center}
