@@ -1204,11 +1204,11 @@ int main() {
 }
 
 ```
-### Diagrama
+#### Diagrama
 
 ![Esquemático 3D](REC/IMG/motor.jpg){ width="600" align=center}
 
-### Video
+#### Video
 
 <iframe width="560" height="315"
 src="https://www.youtube.com/embed/w2n16bGaz-0"
