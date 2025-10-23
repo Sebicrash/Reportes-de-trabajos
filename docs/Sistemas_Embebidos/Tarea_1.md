@@ -1491,8 +1491,9 @@ Señal de salida del filtro a 60Hz
 
 
 
+## Tarea 8 UART
 
-# Comunicación
+### Código
 ```
 #include "pico/stdlib.h"
 #include <stdio.h>
@@ -1560,6 +1561,206 @@ int main() {
         
         }
          sleep_ms(10);
+    }
+}
+```
+
+## Examen 2
+
+```
+#include <stdio.h>
+#include <string>
+#include <cctype>
+#include "pico/stdlib.h"
+#include "hardware/pwm.h"
+#include "hardware/gpio.h"
+
+using namespace std;
+
+#define SERVO_PIN 2
+#define BTN_ATRAS 14
+#define BTN_ADELANTE 13
+#define BTN_MODE 16
+#define UART_ID uart0
+#define BAUDIOS 115200
+#define UART_TX_PIN 0
+#define UART_RX_PIN 1
+#define MAX_POS 10
+#define TOP 20000
+
+int posiciones[MAX_POS] = {0};
+int num_pos = 0;
+int modo = 1, idx = 0;
+volatile bool cambio_modo = false;
+
+// ===================== FUNCIONES =====================
+inline int angle_to_pulse(int a){return 450+(a*1200)/180;}
+inline void set_servo(uint s,uint c,int a){pwm_set_chan_level(s,c,angle_to_pulse(a));}
+
+inline void borrar_lista(){
+    for(int i=0;i<MAX_POS;i++) 
+    posiciones[i]=0;
+    num_pos=0;
+}
+inline bool lista_vacia(){
+    if(num_pos==0) return true;
+    for(int i=0;i<num_pos;i++) if(posiciones[i]!=0) return false;
+    return true;
+}
+inline void imprimir_lista(){
+    printf("Lista actual: ");
+    for(int i=0;i<MAX_POS;i++){
+        printf("%d",posiciones[i]); if(i<MAX_POS-1)printf(", "); 
+    }
+    printf("\n");
+}
+void str_tolower(string &s){for(auto &c:s)c=tolower(c);}
+
+//ISR
+void cambio_isr(uint gpio,uint32_t events){cambio_modo=true;}
+
+int main(){
+    stdio_init_all();
+    sleep_ms(1500);
+
+    uart_init(UART_ID,BAUDIOS);
+    gpio_set_function(UART_TX_PIN,GPIO_FUNC_UART);
+    gpio_set_function(UART_RX_PIN,GPIO_FUNC_UART);
+    uart_set_format(UART_ID,8,1,UART_PARITY_NONE);
+
+    // SERVO
+    gpio_set_function(SERVO_PIN,GPIO_FUNC_PWM);
+    uint slice=pwm_gpio_to_slice_num(SERVO_PIN);
+    uint chan=pwm_gpio_to_channel(SERVO_PIN);
+    pwm_set_clkdiv(slice,150.0f); 
+    pwm_set_wrap(slice,TOP);
+    pwm_set_enabled(slice,true);
+
+    gpio_init(BTN_ATRAS
+); gpio_set_dir(BTN_ATRAS
+    ,false); gpio_pull_up(BTN_ATRAS
+);
+    gpio_init(BTN_ADELANTE);  gpio_set_dir(BTN_ADELANTE,false);  gpio_pull_up(BTN_ADELANTE);
+    gpio_init(BTN_MODE); gpio_set_dir(BTN_MODE,false); gpio_pull_up(BTN_MODE);
+    gpio_set_irq_enabled_with_callback(BTN_MODE,GPIO_IRQ_EDGE_FALL,true,&cambio_isr);
+
+    printf("\n=== MODO 1: ENTRENAMIENTO ===\nComandos: escribir / borrar\n");
+
+    string input;
+    bool prev_fwd=1,prev_back=1;
+
+    while(true){
+        //CAMBIO DE MODO
+        if(cambio_modo){
+            cambio_modo=false;
+            modo=(modo%3)+1;
+            idx=0;
+            printf("\n=== CAMBIO A MODO %d ===\n",modo);
+
+            if(!lista_vacia()){
+                set_servo(slice,chan,posiciones[0]);
+                sleep_ms(500);
+            }
+
+            if(modo==1) printf("Modo entrenamiento: escribir / borrar\n");
+            if(modo==2) printf("Modo repetición automática.\n");
+            if(modo==3) printf("Modo paso a paso con botones.\n");
+        }
+
+        //MODO 1 
+        if(modo==1){
+            int ch=getchar_timeout_us(0);
+            if(ch!=PICO_ERROR_TIMEOUT){
+                if(ch=='\r'||ch=='\n'){
+                    if(!input.empty()){
+                        string cmd=input; str_tolower(cmd);
+                        if(cmd=="borrar"||cmd=="clear"){borrar_lista();printf("OK.\n");imprimir_lista();}
+                        else if(cmd.find("escribir")==0||cmd.find("write")==0){
+                            printf("¿Cuántos valores (1–10)?: ");
+                            fflush(stdout);
+                            string n_str;
+                            while(true){
+                                int c=getchar_timeout_us(0);
+                                if(c!=PICO_ERROR_TIMEOUT){
+                                    if(c=='\r'||c=='\n')break; n_str+=(char)c;
+                                }
+                            }
+                            int n=stoi(n_str);
+                            if(n<1||n>MAX_POS){
+                                printf("Fuera de rango.\n");input.clear();continue;
+                            }
+                            printf("Ingrese %d valores (0–180) separados por espacios:\n",n);
+                            fflush(stdout);
+                            string val_str;
+                            while(true){
+                                int c=getchar_timeout_us(0);
+                                if(c!=PICO_ERROR_TIMEOUT){
+                                    if(c=='\r'||c=='\n')break; val_str+=(char)c;
+                                }
+                            }
+                            borrar_lista();
+                            int i=0; size_t pos=0;
+                            while(i<n && pos<val_str.size()){
+                                size_t e=val_str.find(' ',pos);
+                                int v=stoi(val_str.substr(pos,e-pos));
+                                if(v<0||v>180){printf("Valor fuera de rango.\n");break;}
+                                posiciones[i++]=v;
+                                if(e==string::npos)break; pos=e+1;
+                            }
+                            num_pos=i;
+                            printf("OK.\n");imprimir_lista();
+                        }
+                        else printf("Comando no reconocido.\n");
+                        input.clear();
+                    }
+                } else input+=(char)ch;
+            }
+        }
+
+        //MODO 2
+        else if(modo==2){
+            if(lista_vacia()){
+                printf("SIN MOVIMIENTO, LISTA EN 0\n");sleep_ms(1000);
+            }
+            else{
+                for(int i=0;i<num_pos;i++){
+                    if(cambio_modo)break;
+                    set_servo(slice,chan,posiciones[i]);
+                    sleep_ms(1000);
+                }
+            }
+        }
+
+        //MODO 3
+        else if(modo==3){
+            if(lista_vacia()){
+                printf("SIN MOVIMIENTO, LISTA EN 0\n");sleep_ms(1000);
+            }
+            else{
+                set_servo(slice,chan,posiciones[idx]);
+                bool fwd=gpio_get(BTN_ADELANTE);
+                bool back=gpio_get(BTN_ATRAS
+            );
+
+                if(!fwd && prev_fwd){ 
+                    if(idx<num_pos-1 && posiciones[idx+1]!=0){
+                        idx++;set_servo(slice,chan,posiciones[idx]);
+                        printf("Avance a paso %d (%d°)\n",idx+1,posiciones[idx]);
+                    } else printf("Fin de secuencia.\n");
+                }
+                if(!back && prev_back){
+                    if(idx>0){
+                        idx--;set_servo(slice,chan,posiciones[idx]);
+                        printf("Retroceso a paso %d (%d°)\n",idx+1,posiciones[idx]);
+                    } else printf("Inicio de secuencia.\n");
+                }
+                prev_fwd=fwd; 
+                prev_back=back;
+                sleep_ms(100);
+            }
+        }
+
+        sleep_ms(10);
     }
 }
 ```
