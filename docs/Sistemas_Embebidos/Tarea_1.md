@@ -1564,6 +1564,9 @@ int main() {
     }
 }
 ```
+### Video
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/maq5isjeKiM?si=75wQQwwbAhVU0S0J" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ## Examen 2
 Control de Servomotores con comandos
@@ -1641,14 +1644,14 @@ using namespace std;
 #define BTN_ATRAS 14
 #define BTN_ADELANTE 13
 #define BTN_MODE 16
-#define UART_ID uart0
+#define UARTID uart0
 #define BAUDIOS 115200
-#define UART_TX_PIN 0
-#define UART_RX_PIN 1
-#define MAX_POS 10
+#define TX 0
+#define RX 1
+#define MOVIMIENTOS 10
 #define TOP 20000
 
-int posiciones[MAX_POS] = {0};
+int posiciones[MOVIMIENTOS] = {0};
 int num_pos = 0;
 int modo = 1, idx = 0;
 volatile bool cambio_modo = false;
@@ -1658,7 +1661,7 @@ inline int angle_to_pulse(int a){return 450+(a*1200)/180;}
 inline void set_servo(uint s,uint c,int a){pwm_set_chan_level(s,c,angle_to_pulse(a));}
 
 inline void borrar_lista(){
-    for(int i=0;i<MAX_POS;i++) 
+    for(int i=0;i<MOVIMIENTOS;i++) 
     posiciones[i]=0;
     num_pos=0;
 }
@@ -1669,8 +1672,8 @@ inline bool lista_vacia(){
 }
 inline void imprimir_lista(){
     printf("Lista actual: ");
-    for(int i=0;i<MAX_POS;i++){
-        printf("%d",posiciones[i]); if(i<MAX_POS-1)printf(", "); 
+    for(int i=0;i<MOVIMIENTOS;i++){
+        printf("%d",posiciones[i]); if(i<MOVIMIENTOS-1)printf(", "); 
     }
     printf("\n");
 }
@@ -1683,10 +1686,10 @@ int main(){
     stdio_init_all();
     sleep_ms(1500);
 
-    uart_init(UART_ID,BAUDIOS);
-    gpio_set_function(UART_TX_PIN,GPIO_FUNC_UART);
-    gpio_set_function(UART_RX_PIN,GPIO_FUNC_UART);
-    uart_set_format(UART_ID,8,1,UART_PARITY_NONE);
+    uart_init(UARTID,BAUDIOS);
+    gpio_set_function(TX,GPIO_FUNC_UART);
+    gpio_set_function(RX,GPIO_FUNC_UART);
+    uart_set_format(UARTID,8,1,UART_PARITY_NONE);
 
     // SERVO
     gpio_set_function(SERVO_PIN,GPIO_FUNC_PWM);
@@ -1726,7 +1729,6 @@ int main(){
             if(modo==2) printf("Modo repetición automática.\n");
             if(modo==3) printf("Modo paso a paso con botones.\n");
         }
-
         //MODO 1 
         if(modo==1){
             int ch=getchar_timeout_us(0);
@@ -1746,7 +1748,7 @@ int main(){
                                 }
                             }
                             int n=stoi(n_str);
-                            if(n<1||n>MAX_POS){
+                            if(n<1||n>MOVIMIENTOS){
                                 printf("Fuera de rango.\n");input.clear();continue;
                             }
                             printf("Ingrese %d valores (0–180) separados por espacios:\n",n);
@@ -1776,7 +1778,6 @@ int main(){
                 } else input+=(char)ch;
             }
         }
-
         //MODO 2
         else if(modo==2){
             if(lista_vacia()){
@@ -1790,7 +1791,6 @@ int main(){
                 }
             }
         }
-
         //MODO 3
         else if(modo==3){
             if(lista_vacia()){
@@ -1819,8 +1819,11 @@ int main(){
                 sleep_ms(100);
             }
         }
-
         sleep_ms(10);
     }
 }
 ```
+
+### Video
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/r94heoq_Mww" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
