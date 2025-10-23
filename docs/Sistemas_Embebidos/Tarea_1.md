@@ -1566,6 +1566,66 @@ int main() {
 ```
 
 ## Examen 2
+Control de Servomotores con comandos
+Hardware mínimo
+1 × servomotor en un pin PWM (50 Hz).
+
+3 × botones:
+
+BTN_MODE: cambia el modo activo (cíclico: Entrenamiento → Continuo → Step → …).
+
+BTN_NEXT: avanza a la siguiente posición (sólo en Step).
+
+BTN_PREV: retrocede a la posición anterior (sólo en Step).
+
+Pi pico 2
+
+Modos de operación
+1) Modo Entrenamiento
+Se recibe texto por USB-serial con los comandos siguientes (se aceptan minúsculas/mayúsculas indistintamente y también sus alias en inglés):
+
+Borrar (alias: clear, borrar)
+
+Sintaxis: Borrar
+
+Efecto: elimina la lista completa de posiciones.
+
+Respuesta: OK.
+
+Escribir (alias: write, escribir)
+
+Sintaxis: Escribir, v1, v2, ..., vn
+
+vi son enteros en 0–180.
+
+Efecto: sobrescribe la lista con los valores dados en ese orden.
+
+Respuesta: OK si todos son válidos y la lisa de posiciones; si alguno está fuera de rango o la lista queda vacía → Error argumento invalido.
+
+2) Modo Continuo
+Recorre todas las posiciones de la lista en orden, moviendo el servo e imprimiendo cada 1.5 s:
+
+Formato: posX: V (por ejemplo, pos1: 90), donde X es base 1.
+
+Si la lista está vacía: imprimir cada 1.5 s Error no hay pos y no mover el servo.
+
+Al cambiar a otro modo, el ciclo se detiene inmediatamente.
+
+
+3) Modo Step
+BTN_NEXT: avanza una posición (si ya está en la última, se mantiene en esa última).
+
+BTN_PREV: retrocede una posición (si ya está en la primera, se mantiene en la primera).
+
+En cada cambio de posición:
+
+mover el servo a la posición seleccionada;
+
+imprimir posX: V.
+
+Si la lista está vacía: al presionar BTN_NEXT o BTN_PREV, imprimir Error no hay pos y no mover el servo.
+
+INFO IMPORTANTE: El movimiento de un servo requiere alimentacion 5-6v y en el pin de signal, un pwm a 50 HZ con un pulso de 1-2ms que representa 0-180 grados
 
 ```
 #include <stdio.h>
