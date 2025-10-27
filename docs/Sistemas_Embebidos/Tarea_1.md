@@ -2043,16 +2043,18 @@ int main(){
     pwm_set_wrap(slice,TOP);
     pwm_set_enabled(slice,true);
 
-    gpio_init(BTN_ATRAS
-); gpio_set_dir(BTN_ATRAS
-    ,false); gpio_pull_up(BTN_ATRAS
-);
-    gpio_init(BTN_ADELANTE);  gpio_set_dir(BTN_ADELANTE,false);  gpio_pull_up(BTN_ADELANTE);
-    gpio_init(BTN_MODE); gpio_set_dir(BTN_MODE,false); gpio_pull_up(BTN_MODE);
+    gpio_init(BTN_ATRAS);
+    gpio_set_dir(BTN_ATRAS,false); 
+    gpio_pull_up(BTN_ATRAS);
+    gpio_init(BTN_ADELANTE);  
+    gpio_set_dir(BTN_ADELANTE,false);  
+    gpio_pull_up(BTN_ADELANTE);
+    gpio_init(BTN_MODE); 
+    gpio_set_dir(BTN_MODE,false); 
+    gpio_pull_up(BTN_MODE);
     gpio_set_irq_enabled_with_callback(BTN_MODE,GPIO_IRQ_EDGE_FALL,true,&cambio_isr);
 
     printf("\n=== MODO 1: ENTRENAMIENTO ===\nComandos: escribir / borrar\n");
-
     string input;
     bool prev_fwd=1,prev_back=1;
 
@@ -2063,12 +2065,10 @@ int main(){
             modo=(modo%3)+1;
             idx=0;
             printf("\n=== CAMBIO A MODO %d ===\n",modo);
-
             if(!lista_vacia()){
                 set_servo(slice,chan,posiciones[0]);
                 sleep_ms(500);
             }
-
             if(modo==1) printf("Modo entrenamiento: escribir / borrar\n");
             if(modo==2) printf("Modo repetición automática.\n");
             if(modo==3) printf("Modo paso a paso con botones.\n");
