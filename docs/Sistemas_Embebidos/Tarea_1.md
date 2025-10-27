@@ -2000,27 +2000,37 @@ int num_pos = 0;
 int modo = 1, idx = 0;
 volatile bool cambio_modo = false;
 
-//FUNCIONES
-inline int angle_to_pulse(int a){return 450+(a*1200)/180;}
-inline void set_servo(uint s,uint c,int a){pwm_set_chan_level(s,c,angle_to_pulse(a));}
+//FUNCIONES 
+inline int angle_to_pulse(int a){
+    return 450+(a*1200)/180;
+}
+//solo llama esa parte del codigo para llamar lo de adentro 
+//de angle to pulse del servo
+inline void set_servo(uint s,uint c,int a){
+    pwm_set_chan_level(s,c,angle_to_pulse(a));
+}
 
-inline void borrar_lista(){
+void borrar_lista(){
     for(int i=0;i<MOVIMIENTOS;i++) 
     posiciones[i]=0;
     num_pos=0;
 }
-inline bool lista_vacia(){
-    if(num_pos==0) return true;
-    for(int i=0;i<num_pos;i++) if(posiciones[i]!=0) return false;
+bool lista_vacia(){
+    if(num_pos==0) 
+        return true;
+    for(int i=0;i<num_pos;i++) 
+        if(posiciones[i]!=0)
+            return false;
     return true;
 }
-inline void imprimir_lista(){
+void imprimir_lista(){
     printf("Lista actual: ");
     for(int i=0;i<MOVIMIENTOS;i++){
         printf("%d",posiciones[i]); if(i<MOVIMIENTOS-1)printf(", "); 
     }
     printf("\n");
 }
+//pasa todo a minusculas
 void str_tolower(string &s){for(auto &c:s)c=tolower(c);}
 
 //ISR
@@ -2044,20 +2054,20 @@ int main(){
     pwm_set_enabled(slice,true);
 
     gpio_init(BTN_ATRAS);
-    gpio_set_dir(BTN_ATRAS,false); 
+    gpio_set_dir(BTN_ATRAS,false);
     gpio_pull_up(BTN_ATRAS);
-    gpio_init(BTN_ADELANTE);  
-    gpio_set_dir(BTN_ADELANTE,false);  
+    gpio_init(BTN_ADELANTE);
+    gpio_set_dir(BTN_ADELANTE,false);
     gpio_pull_up(BTN_ADELANTE);
-    gpio_init(BTN_MODE); 
+    gpio_init(BTN_MODE);
     gpio_set_dir(BTN_MODE,false); 
     gpio_pull_up(BTN_MODE);
     gpio_set_irq_enabled_with_callback(BTN_MODE,GPIO_IRQ_EDGE_FALL,true,&cambio_isr);
 
     printf("\n=== MODO 1: ENTRENAMIENTO ===\nComandos: escribir / borrar\n");
-    string input;
-    bool prev_fwd=1,prev_back=1;
 
+    string input;
+    bool tope_adelante=1,tope_atras=1;
     while(true){
         //CAMBIO DE MODO
         if(cambio_modo){
@@ -2065,6 +2075,7 @@ int main(){
             modo=(modo%3)+1;
             idx=0;
             printf("\n=== CAMBIO A MODO %d ===\n",modo);
+
             if(!lista_vacia()){
                 set_servo(slice,chan,posiciones[0]);
                 sleep_ms(500);
@@ -2076,11 +2087,16 @@ int main(){
         //MODO 1 
         if(modo==1){
             int ch=getchar_timeout_us(0);
+            //uart de clase para controlar la consola
             if(ch!=PICO_ERROR_TIMEOUT){
                 if(ch=='\r'||ch=='\n'){
                     if(!input.empty()){
-                        string cmd=input; str_tolower(cmd);
-                        if(cmd=="borrar"||cmd=="clear"){borrar_lista();printf("OK.\n");imprimir_lista();}
+                        string cmd=input; 
+                        str_tolower(cmd);
+                        if(cmd=="borrar"||cmd=="clear"){
+                            borrar_lista();printf("OK.\n");
+                            imprimir_lista();
+                        }
                         else if(cmd.find("escribir")==0||cmd.find("write")==0){
                             printf("¿Cuántos valores (1–10)?: ");
                             fflush(stdout);
@@ -2091,11 +2107,15 @@ int main(){
                                     if(c=='\r'||c=='\n')break; n_str+=(char)c;
                                 }
                             }
+                            //string to int
                             int n=stoi(n_str);
                             if(n<1||n>MOVIMIENTOS){
-                                printf("Fuera de rango.\n");input.clear();continue;
+                                printf("Fuera de rango.\n");
+                                input.clear();
+                                continue;
                             }
                             printf("Ingrese %d valores (0–180) separados por espacios:\n",n);
+                            //fuerza la salida del texto en el monitor serial
                             fflush(stdout);
                             string val_str;
                             while(true){
@@ -2105,23 +2125,29 @@ int main(){
                                 }
                             }
                             borrar_lista();
-                            int i=0; size_t pos=0;
+                            int i=0; 
+                            size_t pos=0;
                             while(i<n && pos<val_str.size()){
+                                //para que no tenga signo y siempre sea +
                                 size_t e=val_str.find(' ',pos);
                                 int v=stoi(val_str.substr(pos,e-pos));
-                                if(v<0||v>180){printf("Valor fuera de rango.\n");break;}
+                                if(v<0||v>180){
+                                    printf("Valor fuera de rango.\n");break;
+                                }
                                 posiciones[i++]=v;
                                 if(e==string::npos)break; pos=e+1;
                             }
                             num_pos=i;
-                            printf("OK.\n");imprimir_lista();
+                            printf("OK.\n");
+                            imprimir_lista();
                         }
                         else printf("Comando no reconocido.\n");
                         input.clear();
                     }
-                } else input+=(char)ch;
+                } else input+=(char)ch; //agregar el caracter al string input
             }
         }
+
         //MODO 2
         else if(modo==2){
             if(lista_vacia()){
@@ -2131,35 +2157,37 @@ int main(){
                 for(int i=0;i<num_pos;i++){
                     if(cambio_modo)break;
                     set_servo(slice,chan,posiciones[i]);
-                    sleep_ms(1000);
+                    sleep_ms(1500);
                 }
             }
         }
+
         //MODO 3
         else if(modo==3){
             if(lista_vacia()){
-                printf("SIN MOVIMIENTO, LISTA EN 0\n");sleep_ms(1000);
+                printf("SIN MOVIMIENTO, LISTA EN 0\n");
+                sleep_ms(1000);
             }
             else{
                 set_servo(slice,chan,posiciones[idx]);
-                bool fwd=gpio_get(BTN_ADELANTE);
-                bool back=gpio_get(BTN_ATRAS
-            );
-
-                if(!fwd && prev_fwd){ 
+                bool adelante=gpio_get(BTN_ADELANTE);
+                bool atras=gpio_get(BTN_ATRAS);
+                if(!adelante && tope_adelante){ 
                     if(idx<num_pos-1 && posiciones[idx+1]!=0){
-                        idx++;set_servo(slice,chan,posiciones[idx]);
+                        idx++;
+                        set_servo(slice,chan,posiciones[idx]);
                         printf("Avance a paso %d (%d°)\n",idx+1,posiciones[idx]);
                     } else printf("Fin de secuencia.\n");
                 }
-                if(!back && prev_back){
+                if(!atras && tope_atras){
                     if(idx>0){
-                        idx--;set_servo(slice,chan,posiciones[idx]);
+                        idx--;
+                        set_servo(slice,chan,posiciones[idx]);
                         printf("Retroceso a paso %d (%d°)\n",idx+1,posiciones[idx]);
                     } else printf("Inicio de secuencia.\n");
                 }
-                prev_fwd=fwd; 
-                prev_back=back;
+                tope_adelante=adelante; 
+                tope_atras=atras;
                 sleep_ms(100);
             }
         }
