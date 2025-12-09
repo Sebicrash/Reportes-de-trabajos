@@ -2199,3 +2199,527 @@ int main(){
 ### Video
 
 <iframe width="560" height="315" src="https://www.youtube.com/embed/r94heoq_Mww" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+## Proyecto final
+
+### Capstone Micromouse
+
+El proyecto **Micromouse** consiste en diseñar y programar un robot móvil autónomo capaz de explorar un laberinto, construir un mapa y ejecutar una carrera rápida (fast run) desde el inicio hasta el objetivo en el centro.
+
+##### Materiales utilizados
+
+1.  Raspberry Pi Pi Pico2
+2.  Sensores Ultrasónicos HC-SR04
+3.  Puente H TB6612FNG
+4.  Motores
+5.  Acelerómetro MPU6050
+6.  Reguladores de voltaje de 5v y 3.3v
+7.  Carcasa impresa en 3D
+ 
+#### Diseño de coche 
+
+Diseño de la carcasa utilizada para el proyecto, diseñada en Catia V5 adaptada a las necesidades de nuestros sensores, especificaciones técnicas y posteriormente impresa en 3D. 
+![STL](REC/IMG/ratoncin.png){ width="600" align=center}
+
+#### Esquemático y PCB
+
+**Esquemático 2D de la conección del circuito del micromouse.**
+
+![Esquemático 2D](REC/IMG/microPCB.jpg){ width="600" align=center}
+
+**Esquemático final del diseño de la PCB para el micromouse.**
+
+![Esquemático PCB](REC/IMG/microPCB2.jpg){ width="600" align=center}
+
+#### Código
+
+El algoritmo para un robot Micromouse se centra en la exploración y optimización de rutas en un laberinto desconocido, utilizando estrategias para pruebas iniciales como el Algoritmo de la Mano Izquierda (o Derecha) y el Algoritmo FloodFill  para encontrar el camino más corto en la segunda pasada, mapeando el laberinto con sensores para moverse autónomamente y mejorar el rendimiento del trayecto. 
+
+```
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include "pico/stdlib.h"
+#include "hardware/pwm.h"
+#include "hardware/i2c.h"
+#include "hardware/gpio.h"
+
+// ==========================================
+// 1. CONFIGURACIÓN DE HARDWARE Y PINES
+// ==========================================
+#define I2C_PORT i2c0
+#define SDA_PIN 4
+#define SCL_PIN 5
+#define MPU6050_ADDR 0x68
+#define PWR_MGMT_1   0x6B
+#define GYRO_XOUT_H  0x43
+#define GYRO_REG_LECTURA (GYRO_XOUT_H + 2) 
+
+#define TRIG1 6   // Frontal
+#define ECHO1 7
+#define TRIG2 8   // Izquierdo
+#define ECHO2 9
+#define TRIG3 10  // Derecho
+#define ECHO3 11
+
+#define PWMA 22
+#define AIN1 20
+#define AIN2 21
+#define PWMB 16
+#define BIN1 18
+#define BIN2 17
+#define STBY 19
+#define LED_PIN 25
+
+// ==========================================
+// 2. CONSTANTES
+// ==========================================
+#define MAZE_SIZE 12
+const uint32_t TIEMPO_CELDA_MS = 955; 
+const float GIRO_ENTRADA = -70.0f;    
+const float DISTANCIA_OBJETIVO = 3.5f;     
+const float DISTANCIA_PARED_EXISTE = 9.0f; 
+const int OFFSET_MOTOR_DERECHO = 15; 
+
+// Velocidades
+const int VELOCIDAD_BASE = 105; 
+const int VELOCIDAD_GIRO = 117;     
+
+// Ganancias PID
+const float KP_CENTER = 8.0f;  
+const float KD_CENTER = 22.0f; 
+const float KP_WALL   = 10.0f;  
+const float KD_WALL   = 30.0f; 
+const float KP_GYRO   = 4.5f;  
+const float KD_GYRO   = 3.5f;  
+const float KP_GYRO_ASSIST = 1.5f; 
+const float ALPHA_SENSOR = 0.65f; 
+
+// ==========================================
+// 3. VARIABLES GLOBALES
+// ==========================================
+const int DX[4] = {0, 1, 0, -1};
+const int DY[4] = {1, 0, -1, 0};
+
+uint8_t walls[MAZE_SIZE][MAZE_SIZE];
+uint8_t costs[MAZE_SIZE][MAZE_SIZE];
+
+struct RobotState {
+    int x; int y; int dir; 
+} robot;
+
+typedef struct { int x, y; } Point;
+Point queue[MAZE_SIZE * MAZE_SIZE];
+
+float y_accum = 0.0f;
+float gyro_bias = 0.0f;
+absolute_time_t last_time;
+float prev_error = 0.0f; 
+
+volatile absolute_time_t start_time_1, start_time_2, start_time_3;
+volatile float dist_val_1 = 100, dist_val_2 = 100, dist_val_3 = 100;
+
+// ==========================================
+// 4. DRIVERS
+// ==========================================
+void mpu6050_init() {
+    uint8_t buf[2]; buf[0] = PWR_MGMT_1; buf[1] = 0x00;
+    i2c_write_blocking(I2C_PORT, MPU6050_ADDR, buf, 2, false);
+}
+
+int16_t read_word(uint8_t reg) {
+    uint8_t buf[2];
+    i2c_write_blocking(I2C_PORT, MPU6050_ADDR, &reg, 1, true);
+    i2c_read_blocking(I2C_PORT, MPU6050_ADDR, buf, 2, false);
+    return (buf[0] << 8) | buf[1];
+}
+
+void calibrar_gyro() {
+    long sum = 0;
+    for (int i = 0; i < 200; i++) {
+        sum += read_word(GYRO_REG_LECTURA);
+        sleep_ms(5);
+    }
+    gyro_bias = (float)sum / 200.0f / 131.0f;
+}
+
+void update_gyro_angle() {
+    float gyro_val = (read_word(GYRO_REG_LECTURA) / 131.0f) - gyro_bias;
+    if (fabs(gyro_val) < 1.0f) gyro_val = 0; 
+    absolute_time_t now = get_absolute_time();
+    y_accum += gyro_val * (absolute_time_diff_us(last_time, now) / 1e6f);
+    last_time = now;
+}
+
+void gpio_callback(uint gpio, uint32_t events) {
+    absolute_time_t now = get_absolute_time();
+    if (gpio == ECHO1) {
+        if (events & GPIO_IRQ_EDGE_RISE) start_time_1 = now;
+        else if (events & GPIO_IRQ_EDGE_FALL) dist_val_1 = (absolute_time_diff_us(start_time_1, now) * 0.0343f) / 2.0f;
+    } else if (gpio == ECHO2) {
+        if (events & GPIO_IRQ_EDGE_RISE) start_time_2 = now;
+        else if (events & GPIO_IRQ_EDGE_FALL) dist_val_2 = (absolute_time_diff_us(start_time_2, now) * 0.0343f) / 2.0f;
+    } else if (gpio == ECHO3) {
+        if (events & GPIO_IRQ_EDGE_RISE) start_time_3 = now;
+        else if (events & GPIO_IRQ_EDGE_FALL) dist_val_3 = (absolute_time_diff_us(start_time_3, now) * 0.0343f) / 2.0f;
+    }
+}
+
+// Filtro de "Locura" del sensor
+float get_dist(int sensor_idx) {
+    float d = 100.0f;
+    if (sensor_idx == 1) d = dist_val_1;
+    else if (sensor_idx == 2) d = dist_val_2;
+    else if (sensor_idx == 3) d = dist_val_3;
+    
+    if (d > 400.0f) return 100.0f;
+    if (d <= 0.1f) return 1.0f;
+    if (d > 130.0f && d < 300.0f) return 1.0f;
+
+    return d;
+}
+
+void trigger_sensors() {
+    gpio_put(TRIG1, 1); sleep_us(10); gpio_put(TRIG1, 0); sleep_us(1500);
+    gpio_put(TRIG2, 1); sleep_us(10); gpio_put(TRIG2, 0); sleep_us(1500);
+    gpio_put(TRIG3, 1); sleep_us(10); gpio_put(TRIG3, 0); sleep_us(1500);
+}
+
+// ==========================================
+// 5. MOTORES
+// ==========================================
+uint pwm_setup(uint pin) {
+    gpio_set_function(pin, GPIO_FUNC_PWM);
+    uint slice = pwm_gpio_to_slice_num(pin);
+    pwm_set_wrap(slice, 255); 
+    pwm_set_chan_level(slice, pwm_gpio_to_channel(pin), 0); 
+    pwm_set_enabled(slice, true);
+    return slice;
+}
+
+void set_motor_speed(uint sliceA, uint sliceB, int speedL, int speedR) {
+    gpio_put(STBY, 1);
+    if (speedR != 0) speedR += OFFSET_MOTOR_DERECHO;
+    if (speedR >= 0) { gpio_put(AIN1, 1); gpio_put(AIN2, 0); }
+    else { gpio_put(AIN1, 0); gpio_put(AIN2, 1); speedR = -speedR; } 
+    if (speedR > 255) speedR = 255;
+    pwm_set_chan_level(sliceA, pwm_gpio_to_channel(PWMA), speedR);
+
+    if (speedL >= 0) { gpio_put(BIN1, 1); gpio_put(BIN2, 0); }
+    else { gpio_put(BIN1, 0); gpio_put(BIN2, 1); speedL = -speedL; }
+    if (speedL > 255) speedL = 255;
+    pwm_set_chan_level(sliceB, pwm_gpio_to_channel(PWMB), speedL);
+}
+
+void motor_stop_all(uint sliceA, uint sliceB) {
+    pwm_set_chan_level(sliceA, pwm_gpio_to_channel(PWMA), 0);
+    pwm_set_chan_level(sliceB, pwm_gpio_to_channel(PWMB), 0);
+    gpio_put(STBY, 0);
+}
+
+void realizar_giro_relativo(uint sliceA, uint sliceB, float grados) {
+    motor_stop_all(sliceA, sliceB); sleep_ms(200);
+    y_accum = 0.0f; last_time = get_absolute_time();
+    int dir = (grados > 0) ? 1 : -1; 
+    while (fabs(y_accum) < fabs(grados)) {
+        update_gyro_angle();
+        set_motor_speed(sliceA, sliceB, -VELOCIDAD_GIRO * dir, VELOCIDAD_GIRO * dir);
+        sleep_ms(1);
+    }
+    motor_stop_all(sliceA, sliceB); sleep_ms(200); y_accum = 0.0f;
+}
+
+void avanzar_una_celda(uint sliceA, uint sliceB) {
+    const float DISTANCIA_STOP_FRONTAL = 3.3f; 
+    absolute_time_t start_move = get_absolute_time();
+    y_accum = 0.0f; last_time = get_absolute_time();
+    prev_error = 0.0f; 
+
+    float f_izq = get_dist(2);
+    float f_der = get_dist(3);
+
+    while (absolute_time_diff_us(start_move, get_absolute_time()) < (TIEMPO_CELDA_MS * 1000)) {
+        trigger_sensors(); 
+        update_gyro_angle();
+        
+        float r_izq = get_dist(2);
+        float r_der = get_dist(3);
+        float s_front = get_dist(1); 
+        
+        f_izq = (f_izq * ALPHA_SENSOR) + (r_izq * (1.0f - ALPHA_SENSOR));
+        f_der = (f_der * ALPHA_SENSOR) + (r_der * (1.0f - ALPHA_SENSOR));
+
+        if (s_front < DISTANCIA_STOP_FRONTAL) {
+            sleep_ms(78); set_motor_speed(sliceA, sliceB, 0, 0);
+            sleep_ms(50); motor_stop_all(sliceA, sliceB); break; 
+        }
+
+        float error = 0.0f;
+        float kp = KP_GYRO, kd = KD_GYRO;
+        bool pared_izq = f_izq < DISTANCIA_PARED_EXISTE;
+        bool pared_der = f_der < DISTANCIA_PARED_EXISTE;
+        float gyro_correction = (0.0f - y_accum) * KP_GYRO_ASSIST;
+
+        if (pared_izq && pared_der) {
+            error = f_izq - f_der; kp = KP_CENTER; kd = KD_CENTER;
+        } else if (pared_izq) {
+            error = (f_izq - DISTANCIA_OBJETIVO); kp = KP_WALL; kd = KD_WALL; error += gyro_correction;
+        } else if (pared_der) {
+            error = (DISTANCIA_OBJETIVO - f_der); kp = KP_WALL; kd = KD_WALL; error += gyro_correction;
+        } else {
+            error = 0.0f - y_accum; kp = KP_GYRO; kd = KD_GYRO;
+        }
+
+        float derivada = error - prev_error;
+        float salida = (error * kp) + (derivada * kd);
+        prev_error = error;
+        int correccion = (int)salida;
+        if (correccion > 45) correccion = 45; if (correccion < -45) correccion = -45;
+        set_motor_speed(sliceA, sliceB, VELOCIDAD_BASE - correccion, VELOCIDAD_BASE + correccion);
+        sleep_ms(5); 
+    }
+    motor_stop_all(sliceA, sliceB); sleep_ms(100);
+}
+
+// ==========================================
+// 6. MAPEO Y FLOOD FILL (META DE 4 CUADROS)
+// ==========================================
+void inicializar_laberinto() {
+    for(int i=0; i<MAZE_SIZE; i++) for(int j=0; j<MAZE_SIZE; j++) { walls[i][j] = 0; costs[i][j] = 255; }
+    for(int i=0; i<MAZE_SIZE; i++) {
+        walls[i][0] |= 0x08; walls[i][MAZE_SIZE-1] |= 0x02;
+        walls[0][i] |= 0x04; walls[MAZE_SIZE-1][i] |= 0x01;
+    }
+}
+
+void detectar_paredes() {
+    trigger_sensors(); sleep_ms(50); 
+    float f = get_dist(1); float l = get_dist(2); float r = get_dist(3);
+    
+    bool wall_f = (f < DISTANCIA_PARED_EXISTE);
+    bool wall_l = (l < DISTANCIA_PARED_EXISTE);
+    bool wall_r = (r < DISTANCIA_PARED_EXISTE);
+    
+    // OJO: f, l, r pueden ser 1.0f si hubo glitch (get_dist lo hace).
+    bool free_f = (f > 16.0f);
+    bool free_l = (l > 16.0f);
+    bool free_r = (r > 16.0f);
+
+    uint8_t add_mask = 0; uint8_t clear_mask = 0; 
+
+    if (robot.dir == 0) { // N
+        if(wall_f) add_mask|=1; else if(free_f) clear_mask|=1;
+        if(wall_r) add_mask|=2; else if(free_r) clear_mask|=2;
+        if(wall_l) add_mask|=8; else if(free_l) clear_mask|=8;
+    } else if (robot.dir == 1) { // E
+        if(wall_f) add_mask|=2; else if(free_f) clear_mask|=2;
+        if(wall_r) add_mask|=4; else if(free_r) clear_mask|=4;
+        if(wall_l) add_mask|=1; else if(free_l) clear_mask|=1;
+    } else if (robot.dir == 2) { // S
+        if(wall_f) add_mask|=4; else if(free_f) clear_mask|=4;
+        if(wall_r) add_mask|=8; else if(free_r) clear_mask|=8;
+        if(wall_l) add_mask|=2; else if(free_l) clear_mask|=2;
+    } else if (robot.dir == 3) { // W
+        if(wall_f) add_mask|=8; else if(free_f) clear_mask|=8;
+        if(wall_r) add_mask|=1; else if(free_r) clear_mask|=1;
+        if(wall_l) add_mask|=4; else if(free_l) clear_mask|=4;
+    }
+
+    walls[robot.x][robot.y] |= add_mask;     
+    walls[robot.x][robot.y] &= ~clear_mask;  
+
+    if(robot.y < MAZE_SIZE-1) { if(add_mask & 1) walls[robot.x][robot.y+1] |= 4; if(clear_mask & 1) walls[robot.x][robot.y+1] &= ~4; }
+    if(robot.x < MAZE_SIZE-1) { if(add_mask & 2) walls[robot.x+1][robot.y] |= 8; if(clear_mask & 2) walls[robot.x+1][robot.y] &= ~8; }
+    if(robot.y > 0)           { if(add_mask & 4) walls[robot.x][robot.y-1] |= 1; if(clear_mask & 4) walls[robot.x][robot.y-1] &= ~1; }
+    if(robot.x > 0)           { if(add_mask & 8) walls[robot.x-1][robot.y] |= 2; if(clear_mask & 8) walls[robot.x-1][robot.y] &= ~2; }
+}
+
+void flood_fill_update() {
+    for(int i=0; i<MAZE_SIZE; i++) for(int j=0; j<MAZE_SIZE; j++) costs[i][j] = 255;
+    costs[5][5] = 0; costs[6][5] = 0; costs[5][6] = 0; costs[6][6] = 0;
+    int head = 0, tail = 0;
+    queue[tail++] = (Point){5, 5}; queue[tail++] = (Point){6, 5};
+    queue[tail++] = (Point){5, 6}; queue[tail++] = (Point){6, 6};
+
+    while(head < tail) {
+        Point c = queue[head++];
+        uint8_t cd = costs[c.x][c.y];
+        if (c.y < MAZE_SIZE-1 && !(walls[c.x][c.y] & 0x01) && costs[c.x][c.y+1]==255) {
+            costs[c.x][c.y+1] = cd + 1; queue[tail++] = (Point){c.x, c.y+1};
+        }
+        if (c.x < MAZE_SIZE-1 && !(walls[c.x][c.y] & 0x02) && costs[c.x+1][c.y]==255) {
+            costs[c.x+1][c.y] = cd + 1; queue[tail++] = (Point){c.x+1, c.y};
+        }
+        if (c.y > 0 && !(walls[c.x][c.y] & 0x04) && costs[c.x][c.y-1]==255) {
+            costs[c.x][c.y-1] = cd + 1; queue[tail++] = (Point){c.x, c.y-1};
+        }
+        if (c.x > 0 && !(walls[c.x][c.y] & 0x08) && costs[c.x-1][c.y]==255) {
+            costs[c.x-1][c.y] = cd + 1; queue[tail++] = (Point){c.x-1, c.y};
+        }
+    }
+}
+
+int obtener_mejor_direccion() {
+    int best = -1; uint8_t min_cost = 255;
+    if (!(walls[robot.x][robot.y] & 0x01) && robot.y < MAZE_SIZE-1 && costs[robot.x][robot.y+1] < min_cost) { 
+        min_cost = costs[robot.x][robot.y+1]; best = 0; 
+    }
+    if (!(walls[robot.x][robot.y] & 0x02) && robot.x < MAZE_SIZE-1 && costs[robot.x+1][robot.y] < min_cost) { 
+        min_cost = costs[robot.x+1][robot.y]; best = 1; 
+    }
+    if (!(walls[robot.x][robot.y] & 0x04) && robot.y > 0 && costs[robot.x][robot.y-1] < min_cost) { 
+        min_cost = costs[robot.x][robot.y-1]; best = 2; 
+    }
+    if (!(walls[robot.x][robot.y] & 0x08) && robot.x > 0 && costs[robot.x-1][robot.y] < min_cost) { 
+        min_cost = costs[robot.x-1][robot.y]; best = 3; 
+    }
+    return best;
+}
+
+bool es_meta(int x, int y) {
+    return (x >= 5 && x <= 6 && y >= 5 && y <= 6);
+}
+
+// ==========================================
+// 7. PROGRAMA PRINCIPAL
+// ==========================================
+int main() {
+    stdio_init_all();
+    i2c_init(I2C_PORT, 400 * 1000);
+    gpio_set_function(SDA_PIN, GPIO_FUNC_I2C); gpio_set_function(SCL_PIN, GPIO_FUNC_I2C);
+    gpio_pull_up(SDA_PIN); gpio_pull_up(SCL_PIN); mpu6050_init();
+
+    gpio_init(LED_PIN); gpio_set_dir(LED_PIN, GPIO_OUT);
+    gpio_init(TRIG1); gpio_set_dir(TRIG1, GPIO_OUT); gpio_init(ECHO1); gpio_set_dir(ECHO1, GPIO_IN);
+    gpio_init(TRIG2); gpio_set_dir(TRIG2, GPIO_OUT); gpio_init(ECHO2); gpio_set_dir(ECHO2, GPIO_IN);
+    gpio_init(TRIG3); gpio_set_dir(TRIG3, GPIO_OUT); gpio_init(ECHO3); gpio_set_dir(ECHO3, GPIO_IN);
+    
+    gpio_set_irq_enabled_with_callback(ECHO1, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true, &gpio_callback);
+    gpio_set_irq_enabled(ECHO2, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+    gpio_set_irq_enabled(ECHO3, GPIO_IRQ_EDGE_RISE | GPIO_IRQ_EDGE_FALL, true);
+
+    gpio_init(AIN1); gpio_set_dir(AIN1, GPIO_OUT); gpio_init(AIN2); gpio_set_dir(AIN2, GPIO_OUT);
+    gpio_init(BIN1); gpio_set_dir(BIN1, GPIO_OUT); gpio_init(BIN2); gpio_set_dir(BIN2, GPIO_OUT);
+    gpio_init(STBY); gpio_set_dir(STBY, GPIO_OUT);
+
+    uint sliceA = pwm_setup(PWMA); uint sliceB = pwm_setup(PWMB);
+
+    // ==============================================
+    // FASE 1: EXPLORACIÓN
+    // ==============================================
+    gpio_put(LED_PIN, 1);
+    calibrar_gyro();
+    inicializar_laberinto();
+    robot.x = 0; robot.y = 0; robot.dir = 0; 
+    sleep_ms(1000); 
+    gpio_put(LED_PIN, 0);
+
+    realizar_giro_relativo(sliceA, sliceB, GIRO_ENTRADA); 
+    robot.dir = 1; 
+    sleep_ms(200);
+
+    while (true) {
+        if (es_meta(robot.x, robot.y)) {
+            motor_stop_all(sliceA, sliceB);
+            break; 
+        }
+
+        detectar_paredes();
+        flood_fill_update(); 
+        int next_dir = obtener_mejor_direccion();
+
+        if (next_dir != -1) {
+            int diff = next_dir - robot.dir;
+            if (diff == 3) diff = -1; 
+            if (diff == -3) diff = 1; 
+            
+            if (abs(diff) == 2) {
+                float f = get_dist(1); float l = get_dist(2); float r = get_dist(3);
+                if (l > 15.0f && l < 60.0f) { diff = -1; next_dir = (robot.dir + 3) % 4; }
+                else if (r > 15.0f && r < 60.0f) { diff = 1; next_dir = (robot.dir + 1) % 4; }
+            }
+
+            if (diff == 1) realizar_giro_relativo(sliceA, sliceB, -72.0f);     
+            else if (diff == -1) realizar_giro_relativo(sliceA, sliceB, 72.0f); 
+            else if (abs(diff) == 2) realizar_giro_relativo(sliceA, sliceB, 155.0f);
+
+            robot.dir = next_dir;
+        }
+
+        trigger_sensors(); sleep_ms(50);
+        if (get_dist(1) < 6.0f) {
+             motor_stop_all(sliceA, sliceB);
+             gpio_put(LED_PIN, 1); sleep_ms(100); gpio_put(LED_PIN, 0);
+             continue; 
+        }
+
+        avanzar_una_celda(sliceA, sliceB);
+        robot.x += DX[robot.dir];
+        robot.y += DY[robot.dir];
+    }
+
+    // ==============================================
+    // FASE DE PAUSA
+    // ==============================================
+    for(int k=0; k<40; k++) { 
+        gpio_put(LED_PIN, 1); sleep_ms(200); 
+        gpio_put(LED_PIN, 0); sleep_ms(200); 
+    }
+    
+    sleep_ms(2000); 
+
+    robot.x = 0; robot.y = 0; robot.dir = 0; 
+    y_accum = 0; 
+    last_time = get_absolute_time();
+    calibrar_gyro(); 
+
+    realizar_giro_relativo(sliceA, sliceB, GIRO_ENTRADA); 
+    robot.dir = 1; 
+    sleep_ms(500);
+
+    // ==============================================
+    // FASE 2: CARRERA RÁPIDA (SIN MAPEO)
+    // ==============================================
+    while (true) {
+        if (es_meta(robot.x, robot.y)) {
+            motor_stop_all(sliceA, sliceB);
+            while(1) { gpio_put(LED_PIN, 1); sleep_ms(100); gpio_put(LED_PIN, 0); sleep_ms(100); }
+        }
+
+        // AQUÍ ESTABA EL ERROR: BORRAMOS detectar_paredes()
+        // detectar_paredes(); <--- ¡ELIMINADA!
+        
+        flood_fill_update(); 
+        int next_dir = obtener_mejor_direccion();
+
+        if (next_dir != -1) {
+            int diff = next_dir - robot.dir;
+            if (diff == 3) diff = -1; 
+            if (diff == -3) diff = 1; 
+            
+            if (diff == 1) realizar_giro_relativo(sliceA, sliceB, -72.0f);     
+            else if (diff == -1) realizar_giro_relativo(sliceA, sliceB, 72.0f); 
+            else if (abs(diff) == 2) realizar_giro_relativo(sliceA, sliceB, 155.0f);
+
+            robot.dir = next_dir;
+        }
+
+        avanzar_una_celda(sliceA, sliceB);
+        robot.x += DX[robot.dir];
+        robot.y += DY[robot.dir];
+    }
+    return 0;
+}
+```
+
+#### Capstone Micromouse FINAL
+
+Imagen representativa del proyecto final ensamblado en su totalidad en funcionamiento
+
+![Esquemático 3D](REC/IMG/gordito.jpg){ width="600" align=center}
+
+##### Videos
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/PAQea6uL2Jg" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/9UtR7NLuaik" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
