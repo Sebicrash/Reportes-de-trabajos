@@ -104,23 +104,23 @@ void app_main(void)
 
 1. Priority experiment (hello_task priority 5 → 2):
 
-The blink_task runs more consistently, while hello_task still runs but may execute less frequently.
+    The blink_task runs more consistently, while hello_task still runs but may execute less frequently.
 
 2. Does behavior change? Why might it (or might it not)?
 
-The behavior changes slightly because a higher-priority task is scheduled first, but both tasks still run since they block using delays.
+    The behavior changes slightly because a higher-priority task is scheduled first, but both tasks still run since they block using delays.
 
 3. Starvation demo (remove vTaskDelay from hello_task):
 
-hello_task runs continuously and at some point the CPU crashes.
+    hello_task runs continuously and at some point the CPU crashes.
 
 4. What happens to blinking?
 
-The LED stops blinking or becomes very irregular because blink_task is starved of CPU time.
+    The LED stops blinking or becomes very irregular because blink_task is starved of CPU time.
 
 5. Why blocking helps (one sentence):
 
-Blocking with delays allows to switch tasks fairly and prevents one task from monopolizing the CPU.
+    Blocking with delays allows to switch tasks fairly and prevents one task from monopolizing the CPU.
 
 ### Lab 2
 #### Goal
@@ -199,27 +199,27 @@ void app_main(void)
 
 1. Make the producer faster (200ms → 20ms):
 
-The producer generates data much faster than the consumer can process it.
+    The producer generates data much faster than the consumer can process it.
 
 2. When do you see “Queue full”?
 
-Right now it never appears, but it would appear if the producer fills the queue faster than the consumer removes items from it.
+    Right now it never appears, but it would appear if the producer fills the queue faster than the consumer removes items from it.
 
 3. Increase the queue length (5 → 20):
 
-The queue can store more items before becoming full.
+    The queue can store more items before becoming full.
 
 4. What changes?
 
-Queue full never appears or takes a lot of time to appear.
+    Queue full never appears or takes a lot of time to appear.
 
 5. Make the consumer “slow”:
 
-After adding a delay, the consumer processes items more slowly than they are produced.
+    After adding a delay, the consumer processes items more slowly than they are produced.
 
 6. What pattern is happening now (buffering / backlog)?
 
-A backlog forms where items accumulate in the queue faster than they are consumed.
+    A backlog forms where items accumulate in the queue faster than they are consumed.
 
 ### Lab 3 Mutex
 
@@ -331,17 +331,17 @@ void app_main(void)
 
 1. Remove the mutex again. Do you ever see weird behavior?
 
-Yes, the counter sometimes skips or repeats values due to race conditions.
+    Yes, the counter sometimes skips or repeats values due to race conditions.
 
 2. Change priorities (TaskA = 6, TaskB = 4):
 
-TaskA runs more often because it has higher priority.
+    TaskA runs more often because it has higher priority.
 
 3. What do you expect and why?
 
-TaskA increments the counter more frequently since the scheduler favors higher-priority tasks.
+    TaskA increments the counter more frequently since the scheduler favors higher-priority tasks.
 
 4. In one sentence: what does a mutex “guarantee”?
 
-A mutex guarantees exclusive access to a shared variable so only one task can use it at a time.
+    A mutex guarantees exclusive access to a shared variable so only one task can use it at a time.
 
