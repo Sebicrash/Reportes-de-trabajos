@@ -315,3 +315,11 @@ void app_main(void)
 
 4. **In one sentence: what does a mutex “guarantee”?:** A mutex guarantees exclusive access to a shared variable so only one task can use it at a time.
 
+## Wi-FI Programming Lab: HTTP Server
+### Lab 1: Basic Wifi Setup
+In this lab, we will create a firmware which permits us to print a sca list of the following:
+
+- SSID
+- RSSI
+- Channel
+- Auth mode(Open, WPA2, etc.)
