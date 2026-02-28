@@ -1129,9 +1129,411 @@ void app_main(void)
 ### Excercise 3 code:
 
 ```
-hi
+/*
+ * LAB D — ESP32-C6 Wi-Fi + HTTP + 2 LEDs + Button + Motor (TB6612)
+ * ESP-IDF v5.x
+ */
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/task.h"
+
+#include "esp_log.h"
+#include "esp_err.h"
+
+#include "nvs_flash.h"
+#include "esp_netif.h"
+#include "esp_event.h"
+#include "esp_wifi.h"
+
+#include "driver/gpio.h"
+#include "driver/ledc.h"
+#include "esp_http_server.h"
+
+#define WIFI_SSID "Oppo Reno7 5G"
+#define WIFI_PASS "Ar1356673"
+
+#define LED1_GPIO 8
+#define LED2_GPIO  // 1
+#define BUTTON_GPIO 10
+
+// TB6612 
+#define MOTOR_PWM_GPIO   4   // PWMA
+#define MOTOR_IN1_GPIO   5   // AIN1
+#define MOTOR_IN2_GPIO   6   // AIN2
+#define MOTOR_STBY_GPIO  1  // STBY 13  <-- CAMBIO IMPORTANTE 
+
+// LEDC
+#define MOTOR_LEDC_TIMER     LEDC_TIMER_0
+#define MOTOR_LEDC_MODE      LEDC_LOW_SPEED_MODE
+#define MOTOR_LEDC_CHANNEL   LEDC_CHANNEL_0
+#define MOTOR_LEDC_DUTY_RES  LEDC_TIMER_10_BIT
+#define MOTOR_LEDC_FREQUENCY 5000
+
+/* ===================== GLOBALS ===================== */
+static const char *TAG = "LAB_3";
+
+static EventGroupHandle_t s_wifi_event_group;
+#define WIFI_CONNECTED_BIT BIT0
+
+static int s_led1_state = 0;
+static int s_led2_state = 0;
+static int s_button_last_state = -1;
+static int s_motor_speed = 0;
+
+static httpd_handle_t s_server = NULL;
+
+//LED 
+static void led_init(void)
+{
+    gpio_reset_pin(LED1_GPIO);
+    gpio_set_direction(LED1_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED1_GPIO, 0);
+
+    gpio_reset_pin(LED2_GPIO);
+    gpio_set_direction(LED2_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED2_GPIO, 0);
+}
+
+static void led_set(int led, int state)
+{
+    if (led == 1) {
+        s_led1_state = state;
+        gpio_set_level(LED1_GPIO, state);
+        ESP_LOGI(TAG, "LED 1 -> %s", state ? "ON" : "OFF");
+    } else if (led == 2) {
+        s_led2_state = state;
+        gpio_set_level(LED2_GPIO, state);
+        ESP_LOGI(TAG, "LED 2 -> %s", state ? "ON" : "OFF");
+    }
+}
+
+//BUTTON 
+static void button_init(void)
+{
+    gpio_reset_pin(BUTTON_GPIO);
+    gpio_set_direction(BUTTON_GPIO, GPIO_MODE_INPUT);
+    gpio_set_pull_mode(BUTTON_GPIO, GPIO_PULLUP_ONLY); // pressed=0
+}
+
+static void button_task(void *arg)
+{
+    while (1)
+    {
+        int level = gpio_get_level(BUTTON_GPIO);
+        int pressed = (level == 0);
+
+        if (pressed != s_button_last_state)
+        {
+            s_button_last_state = pressed;
+            ESP_LOGI(TAG, "Button -> %s", pressed ? "PRESSED" : "RELEASED");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(100));
+    }
+}
+
+// MOTOR
+static void motor_init(void)
+{
+    // DIR pins
+    gpio_reset_pin(MOTOR_IN1_GPIO);
+    gpio_set_direction(MOTOR_IN1_GPIO, GPIO_MODE_OUTPUT);
+
+    gpio_reset_pin(MOTOR_IN2_GPIO);
+    gpio_set_direction(MOTOR_IN2_GPIO, GPIO_MODE_OUTPUT);
+
+    // STBY (CRÍTICO)
+    gpio_reset_pin(MOTOR_STBY_GPIO);
+    gpio_set_direction(MOTOR_STBY_GPIO, GPIO_MODE_OUTPUT);
+    gpio_set_level(MOTOR_STBY_GPIO, 1); // habilitar driver
+
+    // default direction
+    gpio_set_level(MOTOR_IN1_GPIO, 1);
+    gpio_set_level(MOTOR_IN2_GPIO, 0);
+
+    ledc_timer_config_t timer = {
+        .speed_mode = MOTOR_LEDC_MODE,
+        .timer_num = MOTOR_LEDC_TIMER,
+        .duty_resolution = MOTOR_LEDC_DUTY_RES,
+        .freq_hz = MOTOR_LEDC_FREQUENCY,
+        .clk_cfg = LEDC_AUTO_CLK
+    };
+    ESP_ERROR_CHECK(ledc_timer_config(&timer));
+
+    ledc_channel_config_t channel = {
+        .speed_mode = MOTOR_LEDC_MODE,
+        .channel = MOTOR_LEDC_CHANNEL,
+        .timer_sel = MOTOR_LEDC_TIMER,
+        .intr_type = LEDC_INTR_DISABLE,
+        .gpio_num = MOTOR_PWM_GPIO, // PWMA
+        .duty = 0,
+        .hpoint = 0
+    };
+    ESP_ERROR_CHECK(ledc_channel_config(&channel));
+
+    ESP_LOGI(TAG, "Motor init: PWMA=%d AIN1=%d AIN2=%d STBY=%d",
+             MOTOR_PWM_GPIO, MOTOR_IN1_GPIO, MOTOR_IN2_GPIO, MOTOR_STBY_GPIO);
+}
+
+static void motor_set_speed(int percent)
+{
+    if (percent < 0) percent = 0;
+    if (percent > 100) percent = 100;
+    s_motor_speed = percent;
+
+    // habilita driver cuando hay velocidad
+    gpio_set_level(MOTOR_STBY_GPIO, (percent > 0) ? 1 : 0);
+
+    // duty 0..1023
+    uint32_t duty = (percent * 1023) / 100;
+
+    ledc_set_duty(MOTOR_LEDC_MODE, MOTOR_LEDC_CHANNEL, duty);
+    ledc_update_duty(MOTOR_LEDC_MODE, MOTOR_LEDC_CHANNEL);
+
+    ESP_LOGI(TAG, "Motor speed: %d%% (duty=%lu)", percent, (unsigned long)duty);
+}
+
+/* ===================== HTTP API ===================== */
+static esp_err_t api_status_get(httpd_req_t *req)
+{
+    char resp[128];
+    int button_pressed = (gpio_get_level(BUTTON_GPIO) == 0);
+
+    snprintf(resp, sizeof(resp),
+             "{\"led1\":%d,\"led2\":%d,\"button\":%d,\"motor\":%d}",
+             s_led1_state, s_led2_state, button_pressed, s_motor_speed);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_send(req, resp, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+
+static esp_err_t api_led_post(httpd_req_t *req)
+{
+    char buf[256] = {0};
+    int r = httpd_req_recv(req, buf, sizeof(buf)-1);
+    if (r <= 0) return ESP_FAIL;
+    buf[r] = '\0';
+
+    int led = -1, state = -1;
+
+    char *p_led = strstr(buf, "\"led\"");
+    if (p_led) { char *c = strchr(p_led, ':'); if (c) led = atoi(c + 1); }
+
+    char *p_state = strstr(buf, "\"state\"");
+    if (p_state) { char *c = strchr(p_state, ':'); if (c) state = atoi(c + 1); }
+
+    if ((led == 1 || led == 2) && (state == 0 || state == 1))
+        led_set(led, state);
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t api_motor_post(httpd_req_t *req)
+{
+    char buf[128] = {0};
+    int r = httpd_req_recv(req, buf, sizeof(buf)-1);
+    if (r <= 0) return ESP_FAIL;
+    buf[r] = '\0';
+
+    char *p_speed = strstr(buf, "\"speed\"");
+    if (p_speed) {
+        char *c = strchr(p_speed, ':');
+        if (c) motor_set_speed(atoi(c + 1));
+    }
+
+    httpd_resp_set_type(req, "application/json");
+    httpd_resp_sendstr(req, "{\"ok\":true}");
+    return ESP_OK;
+}
+
+static esp_err_t root_get_handler(httpd_req_t *req)
+{
+    static const char *INDEX_HTML =
+        "<!doctype html>\n"
+        "<html>\n"
+        "<head>\n"
+        "  <meta charset='utf-8'>\n"
+        "  <meta name='viewport' content='width=device-width, initial-scale=1'>\n"
+        "  <title>ESP32-C6 Control</title>\n"
+        "</head>\n"
+        "<body>\n"
+
+        "  <h2>ESP32-C6 Control Panel</h2>\n"
+
+        "  <hr>\n"
+        "  <h3>LED 1</h3>\n"
+        "  <button onclick='setLed(1,1)'>ON</button>\n"
+        "  <button onclick='setLed(1,0)'>OFF</button>\n"
+        "  <p id='led1'>State: ?</p>\n"
+
+        "  <hr>\n"
+        "  <h3>LED 2</h3>\n"
+        "  <button onclick='setLed(2,1)'>ON</button>\n"
+        "  <button onclick='setLed(2,0)'>OFF</button>\n"
+        "  <p id='led2'>State: ?</p>\n"
+
+        "  <hr>\n"
+        "  <h3>Push Button</h3>\n"
+        "  <p id='button'>Waiting...</p>\n"
+
+        "  <hr>\n"
+        "  <h3>Motor Speed</h3>\n"
+        "  <p>Speed: <span id='motor'>0</span>%</p>\n"
+        "  <input type='range' min='0' max='100' value='0' "
+        "         oninput='setMotor(this.value)'>\n"
+
+        "\n"
+        "  <script>\n"
+
+        "    async function refresh(){\n"
+        "      const r = await fetch('/api/status');\n"
+        "      const j = await r.json();\n"
+
+        "      document.getElementById('led1').innerText = 'State: ' + j.led1;\n"
+        "      document.getElementById('led2').innerText = 'State: ' + j.led2;\n"
+        "      document.getElementById('motor').innerText = j.motor;\n"
+        "      document.getElementById('button').innerText = "
+        "          (j.button == 1) ? 'PRESSED' : 'RELEASED';\n"
+        "    }\n"
+
+        "    async function setLed(l,v){\n"
+        "      await fetch('/api/led', {\n"
+        "        method:'POST',\n"
+        "        headers:{'Content-Type':'application/json'},\n"
+        "        body:JSON.stringify({led:l,state:v})\n"
+        "      });\n"
+        "      refresh();\n"
+        "    }\n"
+
+        "    async function setMotor(v){\n"
+        "      document.getElementById('motor').innerText = v;\n"
+        "      await fetch('/api/motor', {\n"
+        "        method:'POST',\n"
+        "        headers:{'Content-Type':'application/json'},\n"
+        "        body:JSON.stringify({speed:parseInt(v)})\n"
+        "      });\n"
+        "    }\n"
+
+        "    setInterval(refresh, 1000);\n"
+        "    refresh();\n"
+
+        "  </script>\n"
+
+        "</body>\n"
+        "</html>\n";
+
+    httpd_resp_set_type(req, "text/html");
+    httpd_resp_send(req, INDEX_HTML, HTTPD_RESP_USE_STRLEN);
+    return ESP_OK;
+}
+static void http_server_start(void)
+{
+    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
+    ESP_ERROR_CHECK(httpd_start(&s_server, &config));
+
+    httpd_uri_t root = {
+        .uri = "/",
+        .method = HTTP_GET,
+        .handler = root_get_handler,
+        .user_ctx = NULL
+    };
+    httpd_uri_t status = {
+        .uri = "/api/status",
+        .method = HTTP_GET,
+        .handler = api_status_get,
+        .user_ctx = NULL
+    };
+    httpd_uri_t led = {
+        .uri = "/api/led",
+        .method = HTTP_POST,
+        .handler = api_led_post,
+        .user_ctx = NULL
+    };
+    httpd_uri_t motor = {
+        .uri = "/api/motor",
+        .method = HTTP_POST,
+        .handler = api_motor_post,
+        .user_ctx = NULL
+    };
+
+    ESP_ERROR_CHECK(httpd_register_uri_handler(s_server, &root));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(s_server, &status));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(s_server, &led));
+    ESP_ERROR_CHECK(httpd_register_uri_handler(s_server, &motor));
+}
+
+/* ===================== Wi-Fi ===================== */
+static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    }
+
+    if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
+        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+    }
+}
+
+static void wifi_init_sta(void)
+{
+    s_wifi_event_group = xEventGroupCreate();
+
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifi_event_handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifi_event_handler, NULL));
+
+    wifi_config_t wifi_config = {0};
+    strcpy((char*)wifi_config.sta.ssid, WIFI_SSID);
+    strcpy((char*)wifi_config.sta.password, WIFI_PASS);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+}
+
+void app_main(void)
+{
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ESP_ERROR_CHECK(nvs_flash_init());
+    } else {
+        ESP_ERROR_CHECK(ret);
+    }
+
+    wifi_init_sta();
+
+    xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
+                        pdFALSE, pdTRUE, portMAX_DELAY);
+
+    led_init();
+    button_init();
+    motor_init();
+    http_server_start();
+
+    xTaskCreate(button_task, "button_task", 2048, NULL, 5, NULL);
+
+    ESP_LOGI(TAG, "Open http://<ESP_IP>/ in your browser");
+}
 
 ```
 #### Images and videos:
 
----
+
+<iframe width="560" height="315" src="https://www.youtube.com/embed/LlPfXUGHII4" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
